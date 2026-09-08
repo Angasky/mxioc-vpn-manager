@@ -1,0 +1,19 @@
+[Unit]
+Description=Mxioc VPN configuration manager
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/mxioc-rule-manager
+ExecStart=/usr/bin/python3 /opt/mxioc-rule-manager/server.py
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+

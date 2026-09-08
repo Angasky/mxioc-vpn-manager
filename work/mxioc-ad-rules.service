@@ -1,0 +1,15 @@
+[Unit]
+Description=Update Mxioc advertising rule providers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/update-mxioc-ad-rules.py
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/mxioc-rule-manager/rules/clash
+

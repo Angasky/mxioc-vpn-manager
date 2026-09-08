@@ -1,0 +1,32 @@
+# Runtime data and secrets
+outputs/
+profiles/
+backups/
+rules/
+profiles.json
+initial-password.txt
+*.auth.json
+*.auth
+*.yaml
+*.yml
+!.github/**/*.yml
+!examples/**/*.yaml
+
+# Local maintenance scripts may contain production node data
+work/*
+!work/update-ad-rules.py
+!work/mxioc-ad-rules.service
+!work/mxioc-ad-rules.timer
+
+# Python/editor/OS files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
