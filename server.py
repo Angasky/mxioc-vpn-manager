@@ -14,7 +14,8 @@ import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
+from urllib.request import Request, urlopen
 
 import yaml
 
@@ -33,8 +34,22 @@ SESSIONS = {}
 LOCK = threading.RLock()
 CTX = threading.local()
 MAX_BODY = 2 * 1024 * 1024
+MAX_SUBSCRIPTION = 8 * 1024 * 1024
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
+SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess"}
+CONVERSION_FORMATS = {
+    "v2ray": {
+        "name": "V2Ray / v2rayN 通用订阅",
+        "types": SUPPORTED_NODE_TYPES,
+        "note": "适合新版 v2rayN；旧版 V2Ray/v2rayNG 可能不支持 TUIC、Hysteria2 或 Reality。",
+    },
+    "shadowrocket": {
+        "name": "Shadowrocket（小火箭）订阅",
+        "types": SUPPORTED_NODE_TYPES,
+        "note": "适合新版 Shadowrocket；旧版本可能无法识别 TUIC、Hysteria2 或 Reality。",
+    },
+}
 
 
 def load_profiles():
@@ -468,6 +483,308 @@ def parse_node_link(link):
     return config
 
 
+def eligible_group_names(doc):
+    return [group.get("name") for group in doc.get("proxy-groups", [])
+            if isinstance(group, dict) and group.get("name")
+            and group.get("name") not in NON_NODE_GROUPS]
+
+
+def set_node_groups(doc, name, selected_groups, old_name=None):
+    allowed = set(eligible_group_names(doc))
+    selected = allowed if selected_groups is None else set(selected_groups) & allowed
+    for group in doc.get("proxy-groups", []):
+        refs = list(group.get("proxies", []) or [])
+        if old_name:
+            refs = [ref for ref in refs if ref != old_name]
+        refs = [ref for ref in refs if ref != name]
+        if group.get("name") in selected:
+            refs.append(name)
+        group["proxies"] = refs
+
+
+def mutate_chain(method, payload):
+    doc = read_config()
+    nodes = doc.setdefault("proxies", [])
+    name = str(payload.get("name", "")).strip()
+    old_name = str(payload.get("oldName", "")).strip()
+    entry_name = str(payload.get("entry", "")).strip()
+    exit_name = str(payload.get("exit", "")).strip()
+    selected_groups = payload.get("groups")
+    if not name or not entry_name or not exit_name:
+        raise ValueError("链式代理名称、入口节点和出口节点不能为空")
+    if entry_name == exit_name:
+        raise ValueError("入口节点和出口节点不能相同")
+    entry = next((node for node in nodes if node.get("name") == entry_name), None)
+    exit_node = next((node for node in nodes if node.get("name") == exit_name), None)
+    if not entry or not exit_node:
+        raise ValueError("入口节点或出口节点不存在")
+    if entry.get("dialer-proxy") or exit_node.get("dialer-proxy"):
+        raise ValueError("入口和出口请选择普通节点，避免产生循环或多级链路")
+    if method == "POST":
+        if any(node.get("name") == name for node in nodes):
+            raise ValueError("节点名称已经存在")
+        chain = copy.deepcopy(exit_node)
+        chain["name"] = name
+        chain["dialer-proxy"] = entry_name
+        nodes.append(chain)
+        set_node_groups(doc, name, selected_groups)
+    else:
+        index = next((i for i, node in enumerate(nodes) if node.get("name") == old_name), -1)
+        if index < 0 or not nodes[index].get("dialer-proxy"):
+            raise ValueError("原链式代理不存在")
+        if name != old_name and any(node.get("name") == name for node in nodes):
+            raise ValueError("新的节点名称已经存在")
+        chain = copy.deepcopy(exit_node)
+        chain["name"] = name
+        chain["dialer-proxy"] = entry_name
+        nodes[index] = chain
+        if name != old_name:
+            replace_references(doc, old_name, name)
+        set_node_groups(doc, name, selected_groups, old_name if name != old_name else None)
+    write_config(doc, "chain")
+
+
+def fetch_subscription(url):
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("订阅地址必须是完整的 HTTP 或 HTTPS 链接")
+    request = Request(parsed.geturl(), headers={"User-Agent": "Mxioc-Subscription-Importer/1.0"})
+    with urlopen(request, timeout=20) as response:
+        content = response.read(MAX_SUBSCRIPTION + 1)
+    if len(content) > MAX_SUBSCRIPTION:
+        raise ValueError("订阅内容超过 8 MB，已停止读取")
+    return content.decode("utf-8-sig", errors="strict").strip()
+
+
+def parse_subscription_text(text):
+    nodes, skipped = [], []
+    try:
+        doc = yaml.safe_load(text)
+    except Exception:
+        doc = None
+    if isinstance(doc, dict) and isinstance(doc.get("proxies"), list):
+        for item in doc["proxies"]:
+            if not isinstance(item, dict):
+                skipped.append("无效的 Clash 节点")
+                continue
+            node = copy.deepcopy(item)
+            node_type = str(node.get("type", "")).lower()
+            if node_type == "hy2":
+                node_type = "hysteria2"
+                node["type"] = node_type
+            if node_type not in SUPPORTED_NODE_TYPES:
+                skipped.append(str(node.get("name") or node_type or "未知协议"))
+                continue
+            node.pop("dialer-proxy", None)
+            if not node.get("name") or not node.get("server") or not node.get("port"):
+                skipped.append(str(node.get("name") or "信息不完整的节点"))
+                continue
+            nodes.append(node)
+        return nodes, skipped
+    candidates = [text]
+    try:
+        decoded = b64decode_text(text)
+        if "://" in decoded:
+            candidates = decoded.splitlines()
+    except Exception:
+        if "\n" in text:
+            candidates = text.splitlines()
+    for line in candidates:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            nodes.append(parse_node_link(line))
+        except Exception:
+            skipped.append(line.split("#", 1)[-1][:80] if "#" in line else "无法识别的节点")
+    if not nodes:
+        raise ValueError("订阅中没有找到可导入的 Clash 或分享链接节点")
+    return nodes, skipped
+
+
+def subscription_preview(payload):
+    nodes, skipped = parse_subscription_text(fetch_subscription(payload.get("url")))
+    protocols = {}
+    for node in nodes:
+        protocols[node["type"]] = protocols.get(node["type"], 0) + 1
+    return {"total": len(nodes), "protocols": protocols, "skipped": skipped[:30],
+            "groups": eligible_group_names(read_config())}
+
+
+def unique_node_name(name, used):
+    base = str(name or "导入节点").strip()
+    if base not in used:
+        return base
+    number = 2
+    while f"{base}-{number:02d}" in used:
+        number += 1
+    return f"{base}-{number:02d}"
+
+
+def import_subscription(payload):
+    imported, skipped = parse_subscription_text(fetch_subscription(payload.get("url")))
+    doc = read_config()
+    nodes = doc.setdefault("proxies", [])
+    used = {node.get("name") for node in nodes}
+    conflict = str(payload.get("conflict", "rename"))
+    selected_groups = payload.get("groups")
+    added, replaced = [], []
+    for source in imported:
+        node = copy.deepcopy(source)
+        original_name = node["name"]
+        existing = next((i for i, item in enumerate(nodes) if item.get("name") == original_name), -1)
+        if existing >= 0 and conflict == "skip":
+            skipped.append(original_name + "（名称重复）")
+            continue
+        if existing >= 0 and conflict == "replace":
+            nodes[existing] = node
+            set_node_groups(doc, original_name, selected_groups)
+            replaced.append(original_name)
+            continue
+        node["name"] = unique_node_name(original_name, used)
+        used.add(node["name"])
+        nodes.append(node)
+        set_node_groups(doc, node["name"], selected_groups)
+        added.append(node["name"])
+    if not added and not replaced:
+        raise ValueError("没有节点被导入，请检查重复处理方式或订阅内容")
+    write_config(doc, "subscription-import")
+    return {"added": len(added), "replaced": len(replaced), "skipped": len(skipped),
+            "names": (added + replaced)[:30]}
+
+
+def endpoint(node):
+    server = str(node.get("server", ""))
+    if ":" in server and not server.startswith("["):
+        server = "[" + server + "]"
+    return f"{server}:{node.get('port', '')}"
+
+
+def add_transport_query(node, query):
+    network = str(node.get("network") or "tcp")
+    query["type"] = network
+    if network == "grpc":
+        query["serviceName"] = (node.get("grpc-opts") or {}).get("grpc-service-name", "grpc")
+    elif network == "ws":
+        options = node.get("ws-opts") or {}
+        query["path"] = options.get("path", "/")
+        headers = options.get("headers") or {}
+        if headers.get("Host") or headers.get("host"):
+            query["host"] = headers.get("Host") or headers.get("host")
+
+
+def node_to_uri(node):
+    node_type = str(node.get("type", "")).lower()
+    name = quote(str(node.get("name", "节点")), safe="")
+    address = endpoint(node)
+    query = {}
+    if node_type == "vless":
+        query["encryption"] = node.get("encryption", "none")
+        if node.get("flow"):
+            query["flow"] = node["flow"]
+        reality = node.get("reality-opts") or {}
+        query["security"] = "reality" if reality else ("tls" if node.get("tls") else "none")
+        if node.get("servername"):
+            query["sni"] = node["servername"]
+        if node.get("client-fingerprint"):
+            query["fp"] = node["client-fingerprint"]
+        if reality:
+            query["pbk"] = reality.get("public-key", "")
+            query["sid"] = reality.get("short-id", "")
+        add_transport_query(node, query)
+        return f"vless://{quote(str(node.get('uuid', '')), safe='')}@{address}?{urlencode(query)}#{name}"
+    if node_type == "tuic":
+        query = {"congestion_control": node.get("congestion-controller", "bbr"),
+                 "udp_relay_mode": node.get("udp-relay-mode", "native"), "security": "tls"}
+        if node.get("sni"): query["sni"] = node["sni"]
+        if node.get("alpn"): query["alpn"] = ",".join(node["alpn"] if isinstance(node["alpn"], list) else [str(node["alpn"])])
+        if node.get("skip-cert-verify"): query["allow_insecure"] = "1"
+        if node.get("fingerprint"): query["pinned_certchain_sha256"] = node["fingerprint"].replace(":", "")
+        auth = quote(str(node.get("uuid", "")), safe="") + ":" + quote(str(node.get("password", "")), safe="")
+        return f"tuic://{auth}@{address}?{urlencode(query)}#{name}"
+    if node_type == "hysteria2":
+        if node.get("sni"): query["sni"] = node["sni"]
+        if node.get("alpn"): query["alpn"] = ",".join(node["alpn"] if isinstance(node["alpn"], list) else [str(node["alpn"])])
+        if node.get("skip-cert-verify"): query["insecure"] = "1"
+        if node.get("obfs"): query["obfs"] = node["obfs"]
+        if node.get("obfs-password"): query["obfs-password"] = node["obfs-password"]
+        for source, target in (("up", "upmbps"), ("down", "downmbps")):
+            if node.get(source): query[target] = re.sub(r"\s*[Mm][Bb][Pp][Ss]\s*$", "", str(node[source]))
+        if node.get("fingerprint"): query["pinSHA256"] = node["fingerprint"].replace(":", "")
+        suffix = "?" + urlencode(query) if query else ""
+        return f"hysteria2://{quote(str(node.get('password') or node.get('auth') or ''), safe='')}@{address}{suffix}#{name}"
+    if node_type == "trojan":
+        if node.get("sni") or node.get("servername"): query["sni"] = node.get("sni") or node.get("servername")
+        query["security"] = "tls"
+        if node.get("client-fingerprint"): query["fp"] = node["client-fingerprint"]
+        if node.get("skip-cert-verify"): query["allowInsecure"] = "1"
+        add_transport_query(node, query)
+        return f"trojan://{quote(str(node.get('password', '')), safe='')}@{address}?{urlencode(query)}#{name}"
+    if node_type == "ss":
+        auth = base64.urlsafe_b64encode(f"{node.get('cipher', '')}:{node.get('password', '')}".encode()).decode().rstrip("=")
+        return f"ss://{auth}@{address}#{name}"
+    if node_type == "vmess":
+        transport = node.get("network") or "tcp"
+        ws = node.get("ws-opts") or {}
+        grpc = node.get("grpc-opts") or {}
+        data = {"v": "2", "ps": node.get("name", "节点"), "add": node.get("server", ""),
+                "port": str(node.get("port", "")), "id": node.get("uuid", ""),
+                "aid": str(node.get("alterId", node.get("alter-id", 0))), "scy": node.get("cipher", "auto"),
+                "net": transport, "type": "none", "host": (ws.get("headers") or {}).get("Host", ""),
+                "path": grpc.get("grpc-service-name", "grpc") if transport == "grpc" else ws.get("path", ""),
+                "tls": "tls" if node.get("tls") else "", "sni": node.get("servername", "")}
+        encoded = base64.b64encode(json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()).decode().rstrip("=")
+        return "vmess://" + encoded
+    raise ValueError("不支持转换该协议")
+
+
+def conversion_report(profile_id=None):
+    record = profile_record(profile_id)
+    doc = yaml.safe_load(current_files(profile_id)[0].read_text(encoding="utf-8"))
+    nodes = doc.get("proxies", []) or []
+    result = []
+    for format_id, info in CONVERSION_FORMATS.items():
+        supported, skipped = [], []
+        for node in nodes:
+            reason = ""
+            if node.get("dialer-proxy"):
+                reason = "链式代理无法用单节点分享链接表达"
+            elif str(node.get("type", "")).lower() not in info["types"]:
+                reason = "客户端不支持该协议"
+            if reason:
+                skipped.append({"name": node.get("name", "未知节点"), "type": node.get("type", ""), "reason": reason})
+            else:
+                try:
+                    node_to_uri(node)
+                    supported.append(node.get("name", ""))
+                except Exception as error:
+                    skipped.append({"name": node.get("name", "未知节点"), "type": node.get("type", ""), "reason": str(error)})
+        result.append({"id": format_id, "name": info["name"], "note": info["note"],
+                       "supported": len(supported), "skipped": skipped,
+                       "url": f"/convert/{record['id']}/{format_id}"})
+    return result
+
+
+def converted_subscription(profile_id, format_id):
+    if format_id not in CONVERSION_FORMATS:
+        raise ValueError("不支持该转换格式")
+    doc = yaml.safe_load(current_files(profile_id)[0].read_text(encoding="utf-8"))
+    info = CONVERSION_FORMATS[format_id]
+    links, skipped = [], []
+    for node in doc.get("proxies", []) or []:
+        if node.get("dialer-proxy") or str(node.get("type", "")).lower() not in info["types"]:
+            skipped.append(str(node.get("name", "未知节点")))
+            continue
+        try:
+            links.append(node_to_uri(node))
+        except Exception:
+            skipped.append(str(node.get("name", "未知节点")))
+    if not links:
+        raise ValueError("没有可转换的兼容节点")
+    raw = "\n".join(links).encode("utf-8")
+    return base64.b64encode(raw), skipped
+
+
 def snapshot():
     doc = read_config()
     files = current_files()
@@ -649,7 +966,7 @@ def mutate_dns(method, payload):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MxiocManager/2"
+    server_version = "MxiocManager/3"
 
     def json_out(self, value, status=200):
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
@@ -695,6 +1012,24 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.send_error(404)
 
+    def converted(self, profile_id, format_id):
+        try:
+            record = profile_record(profile_id)
+            body, skipped = converted_subscription(profile_id, format_id)
+            filename = quote(record.get("name", profile_id) + "-" + format_id + ".txt")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + filename)
+            self.send_header("Profile-Update-Interval", "24")
+            self.send_header("Subscription-Userinfo", "upload=0; download=0; total=1125899906842624; expire=4102444800")
+            self.send_header("X-Mxioc-Skipped-Nodes", str(len(skipped)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            self.send_error(404)
+
     def page(self):
         body = FRONT.read_bytes()
         self.send_response(200)
@@ -712,6 +1047,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.page()
         if path.startswith("/sub/"):
             return self.subscription(unquote(path[5:]))
+        if path.startswith("/convert/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 3:
+                return self.converted(unquote(parts[1]), unquote(parts[2]))
+            return self.send_error(404)
         if not self.authorized():
             return
         try:
@@ -721,6 +1061,8 @@ class Handler(BaseHTTPRequestHandler):
             self.select_profile()
             if path == "/admin/api/snapshot":
                 self.json_out(snapshot())
+            elif path == "/admin/api/conversions":
+                self.json_out({"formats": conversion_report()})
             elif path == "/admin/api/raw":
                 self.json_out({"yaml": current_files()[0].read_text(encoding="utf-8")})
             elif path == "/admin/api/backups":
@@ -756,9 +1098,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True, "profile": create_profile(data)})
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("POST", data)
+            elif path == "/admin/api/chains": mutate_chain("POST", data)
             elif path == "/admin/api/import-node":
                 config = parse_node_link(data.get("link", ""))
                 mutate_node("POST", {"config": config, "addToGroups": data.get("addToGroups", True)})
+            elif path == "/admin/api/import-subscription/preview":
+                return self.json_out(subscription_preview(data))
+            elif path == "/admin/api/import-subscription":
+                return self.json_out({"ok": True, **import_subscription(data)})
             elif path == "/admin/api/groups": mutate_group("POST", data)
             elif path == "/admin/api/rules": mutate_rule("POST", data)
             elif path == "/admin/api/rules/move": move_rule(data)
@@ -796,6 +1143,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True, "profile": update_profile(data)})
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("PUT", data)
+            elif path == "/admin/api/chains": mutate_chain("PUT", data)
             elif path == "/admin/api/groups": mutate_group("PUT", data)
             elif path == "/admin/api/rules": mutate_rule("PUT", data)
             elif path == "/admin/api/dns": mutate_dns("PUT", data)
