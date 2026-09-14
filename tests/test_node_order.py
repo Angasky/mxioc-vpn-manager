@@ -25,6 +25,18 @@ class NodeOrderTests(unittest.TestCase):
     def test_boundaries_and_invalid_target(self):
         self.assertFalse(server.reorder_nodes(self.nodes, {"name": "A", "direction": -1}))
         self.assertEqual(self.names(), ["A", "B", "C", "D"])
+
+    def test_syncs_node_order_without_moving_special_entries(self):
+        doc = {
+            "proxies": [{"name": name} for name in ("C", "A", "D", "B")],
+            "proxy-groups": [
+                {"name": "Proxy", "proxies": ["DIRECT", "A", "Nested Group", "B", "C"]},
+                {"name": "Media", "proxies": ["B", "REJECT", "D", "A"]},
+            ],
+        }
+        server.sync_group_node_order(doc)
+        self.assertEqual(doc["proxy-groups"][0]["proxies"], ["DIRECT", "C", "Nested Group", "A", "B"])
+        self.assertEqual(doc["proxy-groups"][1]["proxies"], ["A", "REJECT", "D", "B"])
         with self.assertRaisesRegex(ValueError, "目标节点不存在"):
             server.reorder_nodes(self.nodes, {"name": "B", "targetName": "missing"})
         self.assertEqual(self.names(), ["A", "B", "C", "D"])

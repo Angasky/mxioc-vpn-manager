@@ -1140,10 +1140,23 @@ def reorder_nodes(nodes, payload):
     return True
 
 
+def sync_group_node_order(doc):
+    order = {node.get("name"): index for index, node in enumerate(doc.get("proxies", []))}
+    for group in doc.get("proxy-groups", []):
+        refs = group.get("proxies")
+        if not isinstance(refs, list):
+            continue
+        positions = [index for index, ref in enumerate(refs) if ref in order]
+        sorted_refs = sorted((refs[index] for index in positions), key=order.get)
+        for index, ref in zip(positions, sorted_refs):
+            refs[index] = ref
+
+
 def move_node(payload):
     doc = read_config()
     nodes = doc.setdefault("proxies", [])
     if reorder_nodes(nodes, payload):
+        sync_group_node_order(doc)
         write_config(doc, "node-order")
 
 
