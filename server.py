@@ -1110,6 +1110,43 @@ def mutate_node(method, payload):
     write_config(doc, "node")
 
 
+def reorder_nodes(nodes, payload):
+    name = str(payload.get("name", ""))
+    index = next((i for i, node in enumerate(nodes) if node.get("name") == name), -1)
+    if index < 0:
+        raise ValueError("节点不存在")
+
+    if payload.get("targetName"):
+        target_name = str(payload["targetName"])
+        if target_name == name:
+            return False
+        node = nodes.pop(index)
+        target = next((i for i, item in enumerate(nodes) if item.get("name") == target_name), -1)
+        if target < 0:
+            nodes.insert(index, node)
+            raise ValueError("目标节点不存在")
+        if str(payload.get("position", "before")) == "after":
+            target += 1
+        nodes.insert(target, node)
+        return True
+
+    direction = int(payload.get("direction", 0))
+    if direction not in (-1, 1):
+        raise ValueError("排序方向无效")
+    target = max(0, min(len(nodes) - 1, index + direction))
+    if target == index:
+        return False
+    nodes[index], nodes[target] = nodes[target], nodes[index]
+    return True
+
+
+def move_node(payload):
+    doc = read_config()
+    nodes = doc.setdefault("proxies", [])
+    if reorder_nodes(nodes, payload):
+        write_config(doc, "node-order")
+
+
 def mutate_group(method, payload):
     doc = read_config()
     groups = doc.setdefault("proxy-groups", [])
@@ -1346,6 +1383,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True, "profile": create_profile(data)})
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("POST", data)
+            elif path == "/admin/api/nodes/move": move_node(data)
             elif path == "/admin/api/chains": mutate_chain("POST", data)
             elif path == "/admin/api/import-node":
                 config = parse_node_link(data.get("link", ""))

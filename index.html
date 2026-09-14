@@ -558,6 +558,17 @@ tbody tr {
 tbody tr:hover {
   background: rgba(56, 189, 248, 0.04);
 }
+
+.drag-handle {
+  cursor: grab;
+  color: var(--blue-bright);
+  font-size: 18px;
+  user-select: none;
+}
+.drag-handle:active { cursor: grabbing; }
+tbody tr.dragging { opacity: .42; }
+tbody tr.drag-before { box-shadow: inset 0 2px 0 var(--blue-bright); }
+tbody tr.drag-after { box-shadow: inset 0 -2px 0 var(--blue-bright); }
 code {
   padding: 2px 6px;
   border-radius: 4px;
@@ -1090,10 +1101,12 @@ function nodes() {
     <div class="toolbar">
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
     </div>
+    <div class="note">拖动左侧“↕”手柄可调整节点顺序，也可以点击“↑ / ↓”逐项移动；保存后会同步改变订阅中的节点排列。</div>
     <div class="tablewrap">
       <table>
         <thead>
           <tr>
+            <th>ORDER</th>
             <th>NODE_NAME</th>
             <th>PROTOCOL</th>
             <th>SERVER_ENDPOINT</th>
@@ -1101,23 +1114,59 @@ function nodes() {
             <th>ACTIONS</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="nodeRows">
           ${rows.map(x => `
-            <tr>
+            <tr data-node-name="${esc(x.name)}">
+              <td><span class="drag-handle" draggable="true" title="拖动排序">↕</span> <code>${x.index + 1}</code></td>
               <td><b>${esc(x.name)}</b></td>
               <td><code>${esc(x.type)}</code></td>
               <td>${esc(x.server)}</td>
               <td>${esc(x.port)}</td>
               <td>
+                <button class="btn small" onclick="moveNode(${x.index},-1)" ${x.index === 0 ? 'disabled' : ''} title="上移">[ ↑ ]</button>
+                <button class="btn small" onclick="moveNode(${x.index},1)" ${x.index === S.data.nodes.length - 1 ? 'disabled' : ''} title="下移">[ ↓ ]</button>
                 <button class="btn small" onclick="nodeModal(${x.index})">[ 编辑 ]</button>
                 <button class="btn small danger" onclick="deleteNode(${x.index})">[ 删除 ]</button>
               </td>
-            </tr>`).join('') || '<tr><td colspan="5" class="empty">未找到匹配的节点</td></tr>'}
+            </tr>`).join('') || '<tr><td colspan="6" class="empty">未找到匹配的节点</td></tr>'}
         </tbody>
       </table>
     </div>
   </section>`;
   $('search').oninput = nodes;
+  setupNodeDrag();
+}
+
+function setupNodeDrag() {
+  let dragged = '';
+  let rows = [...document.querySelectorAll('#nodeRows tr[data-node-name]')];
+  let clearMarks = () => rows.forEach(row => row.classList.remove('dragging', 'drag-before', 'drag-after'));
+  rows.forEach(row => {
+    let handle = row.querySelector('.drag-handle');
+    handle.ondragstart = event => {
+      dragged = row.dataset.nodeName;
+      row.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', dragged);
+    };
+    handle.ondragend = () => { dragged = ''; clearMarks(); };
+    row.ondragover = event => {
+      if (!dragged || dragged === row.dataset.nodeName) return;
+      event.preventDefault();
+      clearMarks();
+      let rect = row.getBoundingClientRect();
+      row.classList.add(event.clientY < rect.top + rect.height / 2 ? 'drag-before' : 'drag-after');
+    };
+    row.ondrop = async event => {
+      event.preventDefault();
+      let position = row.classList.contains('drag-after') ? 'after' : 'before';
+      let targetName = row.dataset.nodeName;
+      clearMarks();
+      if (!dragged || dragged === targetName) return;
+      await dragNode(dragged, targetName, position);
+      dragged = '';
+    };
+  });
 }
 
 function chains() {
@@ -2365,6 +2414,28 @@ async function moveRule(i, d) {
     await reload();
   } catch (e) {
     alert(e.message);
+  }
+}
+
+async function moveNode(i, direction) {
+  let node = S.data.nodes.find(item => item.index === i);
+  if (!node) return;
+  try {
+    await api('/nodes/move', jsonOpt('POST', { name: node.name, direction }));
+    await reload();
+    notice('节点顺序已保存');
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function dragNode(name, targetName, position) {
+  try {
+    await api('/nodes/move', jsonOpt('POST', { name, targetName, position }));
+    await reload();
+    notice('节点拖拽排序已保存');
+  } catch (error) {
+    alert(error.message);
   }
 }
 
