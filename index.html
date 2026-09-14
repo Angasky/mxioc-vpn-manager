@@ -1603,6 +1603,7 @@ const OPTION_LABELS = {
   trojan: 'Trojan（TLS 伪装协议）',
   ss: 'Shadowsocks（加密代理）',
   vmess: 'VMess（V2Ray 协议）',
+  socks5: 'SOCKS5（通用出口代理）',
   tcp: 'TCP（普通传输）',
   grpc: 'gRPC（多路复用传输）',
   ws: 'WebSocket（网页传输）',
@@ -1733,6 +1734,17 @@ function protocolFields(type, cfg = {}) {
       <div><label>密码</label><input id="nPassword" required value="${esc(cfg.password || '')}"></div>
     </div>`;
 
+  if (type === 'socks5') return `
+    <h4 class="protocol-title">SOCKS5 认证与传输参数</h4>
+    <div class="grid">
+      <div><label>用户名（无认证可留空）</label><input id="nUsername" value="${esc(cfg.username || '')}"></div>
+      <div><label>密码（无认证可留空）</label><input id="nPassword" value="${esc(cfg.password || '')}"></div>
+      <div><label>TLS SNI / Server Name</label><input id="nSni" value="${esc(cfg.servername || '')}" placeholder="仅 TLS SOCKS5 需要"></div>
+      <div class="inlinecheck"><input id="nTls" type="checkbox" ${cfg.tls ? 'checked' : ''}><span>启用 TLS 加密连接</span></div>
+      <div class="span2 inlinecheck"><input id="nSkip" type="checkbox" ${cfg['skip-cert-verify'] ? 'checked' : ''}><span>跳过服务端证书验证 (skip-cert-verify)</span></div>
+    </div>
+    <div class="note">// 支持无认证或用户名/密码认证；作为链式代理出口时，在“链式代理”页面选择此节点为出口即可。</div>`;
+
   return `
     <h4 class="protocol-title">VMess 认证与传输参数</h4>
     <div class="grid">
@@ -1824,6 +1836,12 @@ function readNodeForm() {
   } else if (type === 'ss') {
     cfg.cipher = val('nCipher');
     cfg.password = val('nPassword');
+  } else if (type === 'socks5') {
+    if (val('nUsername')) cfg.username = val('nUsername'); else delete cfg.username;
+    if (val('nPassword')) cfg.password = val('nPassword'); else delete cfg.password;
+    if (val('nSni')) cfg.servername = val('nSni'); else delete cfg.servername;
+    cfg.tls = on('nTls');
+    if (on('nSkip')) cfg['skip-cert-verify'] = true; else delete cfg['skip-cert-verify'];
   } else {
     cfg.uuid = val('nUuid');
     cfg.alterId = Number(val('nAlterId') || 0);
@@ -1863,7 +1881,7 @@ function nodeModal(index) {
         </div>
         <div>
           <label>协议类型</label>
-          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess'], cfg.type || 'vless')}</select>
+          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'socks5'], cfg.type || 'vless')}</select>
         </div>
         <div>
           <label>服务器域名 / IP</label>
@@ -2122,8 +2140,8 @@ function importNodeModal() {
   openModal('IMPORT_NODE // 一键通过链接导入单个节点', `
   <form id="editForm">
     <label>NODE_SHARE_LINK // 节点分享链接</label>
-    <textarea id="nodeLink" required style="min-height:120px" placeholder="粘贴 vless://、tuic://、hysteria2://、hy2://、trojan://、ss:// 或 vmess:// 链接"></textarea>
-    <div class="note">// 系统将自动解析认证 Hash、TLS / Reality 公钥、SNI、ALPN、流控、Hysteria2 带宽；自签证书将自动提取并转换为 SHA-256 安全校验指纹。</div>
+    <textarea id="nodeLink" required style="min-height:120px" placeholder="粘贴 vless://、tuic://、hysteria2://、hy2://、trojan://、ss://、vmess://、socks5:// 或 socks:// 链接"></textarea>
+    <div class="note">// 系统将自动解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；SOCKS5 支持无认证及用户名/密码认证。</div>
     <label class="inlinecheck">
       <input id="importAll" type="checkbox" checked>
       <span>自动加入所有业务代理策略组（广告拦截组除外）</span>

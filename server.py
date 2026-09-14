@@ -18,6 +18,19 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
+try:
+    from yaml import CSafeLoader as YamlLoader, CSafeDumper as YamlDumper
+except ImportError:
+    from yaml import SafeLoader as YamlLoader, SafeDumper as YamlDumper
+
+
+def yaml_load(stream):
+    return yaml.load(stream, Loader=YamlLoader)
+
+
+def yaml_dump(data):
+    return yaml.dump(data, Dumper=YamlDumper, allow_unicode=True, sort_keys=False, width=4096)
+
 
 ROOT = Path("/opt/mxioc-rule-manager")
 FRONT = ROOT / "index.html"
@@ -37,7 +50,7 @@ MAX_BODY = 2 * 1024 * 1024
 MAX_SUBSCRIPTION = 8 * 1024 * 1024
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
-SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess"}
+SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5"}
 CONVERSION_FORMATS = {
     "v2ray": {
         "name": "V2Ray / v2rayN 通用订阅",
@@ -52,22 +65,42 @@ CONVERSION_FORMATS = {
 }
 
 
+PROFILES_CACHE = None
+PROFILES_MTIME = 0
+
+
 def load_profiles():
+    global PROFILES_CACHE, PROFILES_MTIME
     ROOT.mkdir(parents=True, exist_ok=True)
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     if not PROFILES_FILE.exists():
         data = {"profiles": [{"id": "clash", "name": "Mxioc VPN", "protected": True,
                               "files": [str(path) for path in FILES]}]}
         save_profiles(data)
-    data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
-    if not isinstance(data.get("profiles"), list):
-        raise ValueError("订阅配置索引损坏")
-    return data
+        return data
+    try:
+        mtime = PROFILES_FILE.stat().st_mtime_ns
+        if PROFILES_CACHE is not None and PROFILES_MTIME == mtime:
+            return PROFILES_CACHE
+        data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data.get("profiles"), list):
+            raise ValueError("订阅配置索引损坏")
+        PROFILES_CACHE = data
+        PROFILES_MTIME = mtime
+        return data
+    except Exception:
+        data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+        return data
 
 
 def save_profiles(data):
-    PROFILES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    global PROFILES_CACHE, PROFILES_MTIME
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    PROFILES_FILE.write_text(text, encoding="utf-8")
     os.chmod(PROFILES_FILE, 0o600)
+    PROFILES_CACHE = data
+    PROFILES_MTIME = PROFILES_FILE.stat().st_mtime_ns
+
 
 
 def profile_record(profile_id=None):
@@ -130,11 +163,20 @@ def create_profile(payload):
     if template_id == "blank":
         doc = empty_profile_config()
     else:
-        doc = copy.deepcopy(yaml.safe_load(current_files(template_id)[0].read_text(encoding="utf-8")))
+        doc = copy.deepcopy(get_cached_config(current_files(template_id)[0])[0])
     path = PROFILES_DIR / f"{profile_id}.yaml"
     validate_config(doc)
-    path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096), encoding="utf-8")
+    text = yaml_dump(doc)
+    path.write_text(text, encoding="utf-8")
     os.chmod(path, 0o644)
+    stat = path.stat()
+    with CONFIG_CACHE_LOCK:
+        CONFIG_CACHE[str(path.resolve())] = {
+            "mtime_ns": stat.st_mtime_ns,
+            "size": stat.st_size,
+            "doc": copy.deepcopy(doc),
+            "text": text,
+        }
     data["profiles"].append({"id": profile_id, "name": name, "protected": False, "files": [str(path)]})
     save_profiles(data)
     return public_profile(data["profiles"][-1])
@@ -158,6 +200,8 @@ def update_profile(payload):
             old_path = Path(record["files"][0])
             new_path = PROFILES_DIR / f"{new_id}.yaml"
             old_path.rename(new_path)
+            with CONFIG_CACHE_LOCK:
+                CONFIG_CACHE.pop(str(old_path.resolve()), None)
             record["id"] = new_id
             record["files"] = [str(new_path)]
     save_profiles(data)
@@ -172,9 +216,12 @@ def delete_profile(profile_id):
     if record.get("protected"):
         raise ValueError("主订阅不能删除")
     for path in current_files(profile_id):
+        with CONFIG_CACHE_LOCK:
+            CONFIG_CACHE.pop(str(path.resolve()), None)
         path.unlink(missing_ok=True)
     data["profiles"] = [x for x in data["profiles"] if x["id"] != profile_id]
     save_profiles(data)
+
 
 
 def password_hash(password, salt=None):
@@ -222,13 +269,53 @@ def session_valid(header):
     return True
 
 
-def read_config():
-    files = current_files()
-    with LOCK:
-        doc = yaml.safe_load(files[0].read_text(encoding="utf-8"))
+CONFIG_CACHE = {}
+CONFIG_CACHE_LOCK = threading.Lock()
+FRONT_CACHE = None
+FRONT_MTIME = 0
+
+
+def get_front_html():
+    global FRONT_CACHE, FRONT_MTIME
+    try:
+        mtime = FRONT.stat().st_mtime_ns
+        if FRONT_CACHE is not None and FRONT_MTIME == mtime:
+            return FRONT_CACHE
+        FRONT_CACHE = FRONT.read_bytes()
+        FRONT_MTIME = mtime
+        return FRONT_CACHE
+    except Exception:
+        return FRONT.read_bytes()
+
+
+def get_cached_config(path):
+    p = Path(path)
+    stat = p.stat()
+    key = str(p.resolve())
+    with CONFIG_CACHE_LOCK:
+        entry = CONFIG_CACHE.get(key)
+        if entry and entry["mtime_ns"] == stat.st_mtime_ns and entry["size"] == stat.st_size:
+            return entry["doc"], entry["text"]
+
+    text = p.read_text(encoding="utf-8")
+    doc = yaml_load(text)
     if not isinstance(doc, dict):
         raise ValueError("配置文件不是有效的 YAML 对象")
-    return doc
+
+    with CONFIG_CACHE_LOCK:
+        CONFIG_CACHE[key] = {
+            "mtime_ns": stat.st_mtime_ns,
+            "size": stat.st_size,
+            "doc": doc,
+            "text": text,
+        }
+    return doc, text
+
+
+def read_config(copy_doc=True):
+    files = current_files()
+    doc, _ = get_cached_config(files[0])
+    return copy.deepcopy(doc) if copy_doc else doc
 
 
 def validate_config(doc):
@@ -258,13 +345,11 @@ def validate_config(doc):
         dialer = node.get("dialer-proxy")
         if dialer and dialer not in known:
             raise ValueError(f"链式节点 {node.get('name', '?')} 引用了不存在的前置中转：{dialer}")
-    yaml.safe_load(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
 
 
 def write_config(doc, reason="manual"):
     validate_config(doc)
-    text = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=4096)
-    yaml.safe_load(text)
+    text = yaml_dump(doc)
     profile_id = profile_record()["id"]
     files = current_files()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -277,19 +362,38 @@ def write_config(doc, reason="manual"):
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     handle.write(text)
                     handle.flush()
-                    os.fsync(handle.fileno())
                 os.chmod(temp_name, 0o644)
                 os.replace(temp_name, path)
+                stat = path.stat()
+                key = str(path.resolve())
+                with CONFIG_CACHE_LOCK:
+                    CONFIG_CACHE[key] = {
+                        "mtime_ns": stat.st_mtime_ns,
+                        "size": stat.st_size,
+                        "doc": copy.deepcopy(doc),
+                        "text": text,
+                    }
             finally:
                 if os.path.exists(temp_name):
-                    os.unlink(temp_name)
-    prune_backups()
+                    try:
+                        os.unlink(temp_name)
+                    except OSError:
+                        pass
+    prune_backups_async()
 
 
 def prune_backups():
-    items = sorted(BACKUP_DIR.glob("*.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for old in items[100:]:
-        old.unlink(missing_ok=True)
+    try:
+        items = sorted(BACKUP_DIR.glob("*.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in items[100:]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def prune_backups_async():
+    threading.Thread(target=prune_backups, daemon=True).start()
+
 
 
 def rule_parts(raw):
@@ -417,6 +521,30 @@ def parse_node_link(link):
         parsed = urlsplit("ss://x@" + endpoint)
         return {"name": fragment, "type": "ss", "server": parsed.hostname or "",
                 "port": parsed.port or 0, "cipher": unquote(cipher), "password": unquote(password), "udp": True}
+    if scheme in ("socks5", "socks"):
+        parsed = urlsplit(link)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        config = {
+            "name": unquote(parsed.fragment) or "导入的 SOCKS5 节点",
+            "type": "socks5",
+            "server": parsed.hostname or "",
+            "port": parsed.port or 1080,
+            "udp": bool_value(first(query, "udp"), True),
+        }
+        if parsed.username is not None:
+            config["username"] = unquote(parsed.username)
+        if parsed.password is not None:
+            config["password"] = unquote(parsed.password)
+        if bool_value(first(query, "tls")):
+            config["tls"] = True
+        if bool_value(first(query, "skip-cert-verify", "allowInsecure", "insecure")):
+            config["skip-cert-verify"] = True
+        servername = first(query, "sni", "servername")
+        if servername:
+            config["servername"] = servername
+        if not config["server"] or not config["port"]:
+            raise ValueError("SOCKS5 链接中缺少服务器地址或端口")
+        return config
     if scheme not in ("vless", "tuic", "hysteria2", "trojan"):
         raise ValueError("暂不支持该链接协议")
     parsed = urlsplit(link)
@@ -559,7 +687,7 @@ def fetch_subscription(url):
 def parse_subscription_text(text):
     nodes, skipped = [], []
     try:
-        doc = yaml.safe_load(text)
+        doc = yaml_load(text)
     except Exception:
         doc = None
     if isinstance(doc, dict) and isinstance(doc.get("proxies"), list):
@@ -678,6 +806,25 @@ def node_to_uri(node):
     name = quote(str(node.get("name", "节点")), safe="")
     address = endpoint(node)
     query = {}
+    if node_type == "socks5":
+        if node.get("udp") is False:
+            query["udp"] = "false"
+        if node.get("tls"):
+            query["tls"] = "true"
+        if node.get("skip-cert-verify"):
+            query["skip-cert-verify"] = "true"
+        if node.get("servername"):
+            query["sni"] = node["servername"]
+        username = node.get("username")
+        password = node.get("password")
+        auth = ""
+        if username is not None or password is not None:
+            auth = quote(str(username or ""), safe="")
+            if password is not None:
+                auth += ":" + quote(str(password), safe="")
+            auth += "@"
+        suffix = "?" + urlencode(query) if query else ""
+        return f"socks5://{auth}{address}{suffix}#{name}"
     if node_type == "vless":
         query["encryption"] = node.get("encryption", "none")
         if node.get("flow"):
@@ -740,7 +887,7 @@ def node_to_uri(node):
 
 def conversion_report(profile_id=None):
     record = profile_record(profile_id)
-    doc = yaml.safe_load(current_files(profile_id)[0].read_text(encoding="utf-8"))
+    doc, _ = get_cached_config(current_files(profile_id)[0])
     nodes = doc.get("proxies", []) or []
     result = []
     for format_id, info in CONVERSION_FORMATS.items():
@@ -768,7 +915,7 @@ def conversion_report(profile_id=None):
 def converted_subscription(profile_id, format_id):
     if format_id not in CONVERSION_FORMATS:
         raise ValueError("不支持该转换格式")
-    doc = yaml.safe_load(current_files(profile_id)[0].read_text(encoding="utf-8"))
+    doc, _ = get_cached_config(current_files(profile_id)[0])
     info = CONVERSION_FORMATS[format_id]
     links, skipped = [], []
     for node in doc.get("proxies", []) or []:
@@ -786,7 +933,7 @@ def converted_subscription(profile_id, format_id):
 
 
 def snapshot():
-    doc = read_config()
+    doc = read_config(copy_doc=False)
     files = current_files()
     proxies = []
     for index, node in enumerate(doc.get("proxies", [])):
@@ -998,7 +1145,8 @@ class Handler(BaseHTTPRequestHandler):
     def subscription(self, profile_id):
         try:
             record = profile_record(profile_id)
-            body = current_files(profile_id)[0].read_bytes()
+            _, text = get_cached_config(current_files(profile_id)[0])
+            body = text.encode("utf-8")
             filename = quote(record.get("name", profile_id) + ".yaml")
             self.send_response(200)
             self.send_header("Content-Type", "text/yaml; charset=utf-8")
@@ -1031,7 +1179,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def page(self):
-        body = FRONT.read_bytes()
+        body = get_front_html()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -1040,6 +1188,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -1064,7 +1215,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/admin/api/conversions":
                 self.json_out({"formats": conversion_report()})
             elif path == "/admin/api/raw":
-                self.json_out({"yaml": current_files()[0].read_text(encoding="utf-8")})
+                _, text = get_cached_config(current_files()[0])
+                self.json_out({"yaml": text})
             elif path == "/admin/api/backups":
                 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
                 profile_id = profile_record()["id"]
@@ -1125,7 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
                 backup = BACKUP_DIR / name
                 if not backup.exists():
                     raise ValueError("备份不存在")
-                doc = yaml.safe_load(backup.read_text(encoding="utf-8"))
+                doc = yaml_load(backup.read_text(encoding="utf-8"))
                 write_config(doc, "before-restore")
             else:
                 return self.send_error(404)
@@ -1148,7 +1300,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/admin/api/rules": mutate_rule("PUT", data)
             elif path == "/admin/api/dns": mutate_dns("PUT", data)
             elif path == "/admin/api/raw":
-                doc = yaml.safe_load(str(data.get("yaml", "")))
+                doc = yaml_load(str(data.get("yaml", "")))
                 write_config(doc, "raw")
             else:
                 return self.send_error(404)
