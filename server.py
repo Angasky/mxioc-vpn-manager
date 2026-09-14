@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
@@ -43,7 +44,10 @@ FILES = [
 PROFILES_FILE = ROOT / "profiles.json"
 PROFILES_DIR = ROOT / "profiles"
 BACKUP_DIR = ROOT / "backups"
-SESSIONS = {}
+SESSIONS_FILE = ROOT / "sessions.json"
+SESSIONS = None
+SESSION_LOCK = threading.RLock()
+SESSION_TTL = 30 * 24 * 3600
 LOCK = threading.RLock()
 CTX = threading.local()
 MAX_BODY = 2 * 1024 * 1024
@@ -257,16 +261,104 @@ def authenticate(username, password):
     return hmac.compare_digest(username, auth["username"]) and hmac.compare_digest(digest, auth["hash"])
 
 
-def session_valid(header):
-    if not header.startswith("Bearer "):
+def session_digest(token):
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def load_sessions_locked():
+    global SESSIONS
+    if SESSIONS is not None:
+        return SESSIONS
+    try:
+        data = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+        SESSIONS = {str(key): float(value) for key, value in data.items()}
+    except (FileNotFoundError, ValueError, TypeError, json.JSONDecodeError):
+        SESSIONS = {}
+    return SESSIONS
+
+
+def save_sessions_locked():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".sessions.", dir=ROOT)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(SESSIONS or {}, handle, ensure_ascii=False, separators=(",", ":"))
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, SESSIONS_FILE)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def request_session_token(header="", cookie_header=""):
+    if str(header).startswith("Bearer "):
+        return str(header)[7:].strip()
+    try:
+        cookie = SimpleCookie()
+        cookie.load(str(cookie_header or ""))
+        morsel = cookie.get("mxioc_session")
+        return morsel.value if morsel else ""
+    except Exception:
+        return ""
+
+
+def create_session():
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with SESSION_LOCK:
+        sessions = load_sessions_locked()
+        sessions[session_digest(token)] = now + SESSION_TTL
+        for key, expires in list(sessions.items()):
+            if expires <= now:
+                sessions.pop(key, None)
+        save_sessions_locked()
+    return token
+
+
+def session_valid(header="", cookie_header=""):
+    token = request_session_token(header, cookie_header)
+    if not token:
         return False
-    token = header[7:]
-    expires = SESSIONS.get(token, 0)
-    if expires <= time.time():
-        SESSIONS.pop(token, None)
-        return False
-    SESSIONS[token] = time.time() + 12 * 3600
+    now = time.time()
+    digest = session_digest(token)
+    with SESSION_LOCK:
+        sessions = load_sessions_locked()
+        expires = sessions.get(digest, 0)
+        if expires <= now:
+            if digest in sessions:
+                sessions.pop(digest, None)
+                save_sessions_locked()
+            return False
+        if expires < now + SESSION_TTL - 24 * 3600:
+            sessions[digest] = now + SESSION_TTL
+            save_sessions_locked()
     return True
+
+
+def revoke_session(header="", cookie_header=""):
+    token = request_session_token(header, cookie_header)
+    if not token:
+        return
+    with SESSION_LOCK:
+        sessions = load_sessions_locked()
+        if sessions.pop(session_digest(token), None) is not None:
+            save_sessions_locked()
+
+
+def clear_sessions():
+    global SESSIONS
+    with SESSION_LOCK:
+        SESSIONS = {}
+        save_sessions_locked()
+
+
+def session_cookie(token):
+    return (f"mxioc_session={token}; Path=/admin; Max-Age={SESSION_TTL}; "
+            "HttpOnly; Secure; SameSite=Strict")
+
+
+def expired_session_cookie():
+    return "mxioc_session=; Path=/admin; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
 
 
 CONFIG_CACHE = {}
@@ -1115,12 +1207,14 @@ def mutate_dns(method, payload):
 class Handler(BaseHTTPRequestHandler):
     server_version = "MxiocManager/3"
 
-    def json_out(self, value, status=200):
+    def json_out(self, value, status=200, headers=None):
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -1132,7 +1226,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length) or b"{}")
 
     def authorized(self):
-        if session_valid(self.headers.get("Authorization", "")):
+        if session_valid(self.headers.get("Authorization", ""), self.headers.get("Cookie", "")):
             return True
         self.json_out({"error": "请重新登录"}, 401)
         return False
@@ -1237,14 +1331,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not authenticate(str(data.get("username", "")), str(data.get("password", ""))):
                     time.sleep(0.35)
                     return self.json_out({"error": "用户名或密码错误"}, 401)
-                token = secrets.token_urlsafe(32)
-                SESSIONS[token] = time.time() + 12 * 3600
-                return self.json_out({"token": token})
+                token = create_session()
+                return self.json_out({"ok": True}, headers={"Set-Cookie": session_cookie(token)})
             except Exception as exc:
                 return self.json_out({"error": str(exc)}, 400)
         if not self.authorized():
             return
         try:
+            if path == "/admin/api/logout":
+                revoke_session(self.headers.get("Authorization", ""), self.headers.get("Cookie", ""))
+                return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie()})
             data = self.body()
             if path == "/admin/api/profiles":
                 return self.json_out({"ok": True, "profile": create_profile(data)})
@@ -1271,7 +1367,8 @@ class Handler(BaseHTTPRequestHandler):
                 auth = load_auth()
                 salt, digest = password_hash(new_password)
                 save_auth(auth["username"], salt, digest)
-                SESSIONS.clear()
+                clear_sessions()
+                return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie()})
             elif path == "/admin/api/backups/restore":
                 name = Path(str(data.get("name", ""))).name
                 backup = BACKUP_DIR / name

@@ -961,7 +961,7 @@ code {
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const S = {
-  token: sessionStorage.getItem('mxioc_token'),
+  token: sessionStorage.getItem('mxioc_token') || localStorage.getItem('mxioc_token'),
   page: 'overview',
   data: null,
   profiles: [],
@@ -976,19 +976,29 @@ function notice(text) {
   window._noticeTimer = setTimeout(() => t.classList.add('hidden'), 2400);
 }
 
-function logout() {
+function showLogin() {
   sessionStorage.removeItem('mxioc_token');
+  localStorage.removeItem('mxioc_token');
   S.token = null;
   $('app').classList.add('hidden');
   $('login').classList.remove('hidden');
 }
 
+async function logout(remote = true) {
+  if (remote) {
+    try { await fetch('/admin/api/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) {}
+  }
+  showLogin();
+}
+
 async function api(path, opt = {}) {
-  opt.headers = { ...(opt.headers || {}), Authorization: 'Bearer ' + S.token, 'X-Profile': S.profile };
+  opt.headers = { ...(opt.headers || {}), 'X-Profile': S.profile };
+  if (S.token) opt.headers.Authorization = 'Bearer ' + S.token;
+  opt.credentials = 'same-origin';
   let r = await fetch('/admin/api' + path, opt);
   let d = await r.json().catch(() => ({}));
   if (r.status === 401) {
-    logout();
+    showLogin();
     throw Error(d.error || '登录已失效');
   }
   if (!r.ok) throw Error(d.error || '请求失败');
@@ -1578,7 +1588,7 @@ async function system() {
         new: $('pwNew').value
       }));
       alert('密码已成功修改，请重新登录');
-      logout();
+      showLogin();
     } catch (x) {
       alert(x.message);
     }
@@ -2381,8 +2391,9 @@ $('loginForm').onsubmit = async e => {
     }));
     let d = await r.json();
     if (!r.ok) throw Error(d.error);
-    S.token = d.token;
-    sessionStorage.setItem('mxioc_token', d.token);
+    S.token = null;
+    sessionStorage.removeItem('mxioc_token');
+    localStorage.removeItem('mxioc_token');
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
     await loadProfiles();
@@ -2397,7 +2408,7 @@ $('modalClose').onclick = closeModal;
 $('modal').onclick = e => { if (e.target === $('modal')) closeModal(); };
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-$('logout').onclick = logout;
+$('logout').onclick = () => logout(true);
 $('manageProfiles').onclick = profileManager;
 $('profileSelect').onchange = async () => {
   S.profile = $('profileSelect').value;
@@ -2423,11 +2434,12 @@ $('add').onclick = () => ({
   dns: dnsModal
 }[S.page])();
 
-if (S.token) {
-  $('login').classList.add('hidden');
-  $('app').classList.remove('hidden');
-  go('overview').catch(logout);
-}
+$('login').classList.add('hidden');
+$('app').classList.remove('hidden');
+go('overview').catch(error => {
+  if (!$('login').classList.contains('hidden')) return;
+  notice('加载失败：' + error.message);
+});
 </script>
 </body>
 </html>
