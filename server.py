@@ -570,6 +570,27 @@ def certificate_fingerprint(value):
     return ":".join(digest[index:index + 2] for index in range(0, len(digest), 2))
 
 
+def normalize_ipv6_authority(link):
+    """Accept share links that omit the RFC-required brackets around an IPv6 host."""
+    prefix, separator, remainder = str(link).partition("://")
+    if not separator:
+        return link
+    boundaries = [position for position in (remainder.find("?"), remainder.find("#")) if position >= 0]
+    end = min(boundaries) if boundaries else len(remainder)
+    authority, suffix = remainder[:end], remainder[end:]
+    userinfo, at, endpoint = authority.rpartition("@")
+    if not at:
+        endpoint = authority
+    if endpoint.startswith("[") or endpoint.count(":") < 2:
+        return link
+    host, colon, port = endpoint.rpartition(":")
+    if not colon or not port.isdigit():
+        return link
+    normalized = f"[{host}]:{port}"
+    authority = f"{userinfo}@{normalized}" if at else normalized
+    return f"{prefix}://{authority}{suffix}"
+
+
 def parse_node_link(link):
     link = str(link or "").strip().strip('"\'').replace("\\://", "://").replace("\\@", "@").replace("\\.", ".")
     if not link or "://" not in link:
@@ -578,6 +599,7 @@ def parse_node_link(link):
     if scheme == "hy2":
         link = "hysteria2://" + link.split("://", 1)[1]
         scheme = "hysteria2"
+    link = normalize_ipv6_authority(link)
     if scheme == "vmess":
         raw = link.split("://", 1)[1].split("#", 1)[0]
         data = json.loads(b64decode_text(raw))
