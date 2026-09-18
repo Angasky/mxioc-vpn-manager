@@ -15,7 +15,6 @@ initial-password.txt
 # Local maintenance scripts may contain production node data
 work/*
 !work/update-ad-rules.py
-!work/organize-proxy-layout.py
 !work/mxioc-ad-rules.service
 !work/mxioc-ad-rules.timer
 
@@ -30,3 +29,4 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+

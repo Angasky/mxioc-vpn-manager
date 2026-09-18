@@ -53,13 +53,7 @@ CTX = threading.local()
 MAX_BODY = 2 * 1024 * 1024
 MAX_SUBSCRIPTION = 8 * 1024 * 1024
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
-MANAGED_CATEGORY_GROUPS = {
-    "⭐ 常用节点", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点",
-    "🇰🇷 韩国节点", "🇻🇳 越南节点", "🔗 链式代理", "🧰 其他节点",
-}
-NON_NODE_GROUPS = {
-    "🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截",
-} | MANAGED_CATEGORY_GROUPS
+NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
 SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5"}
 CONVERSION_FORMATS = {
     "v2ray": {
