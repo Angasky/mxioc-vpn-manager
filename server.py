@@ -54,7 +54,7 @@ MAX_BODY = 2 * 1024 * 1024
 MAX_SUBSCRIPTION = 8 * 1024 * 1024
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
-SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5"}
+SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5", "http"}
 CONVERSION_FORMATS = {
     "v2ray": {
         "name": "V2Ray / v2rayN 通用订阅",
@@ -635,6 +635,41 @@ def parse_node_link(link):
         parsed = urlsplit("ss://x@" + endpoint)
         return {"name": fragment, "type": "ss", "server": parsed.hostname or "",
                 "port": parsed.port or 0, "cipher": unquote(cipher), "password": unquote(password), "udp": True}
+    if scheme in ("http", "https"):
+        parsed = urlsplit(link)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        config = {
+            "name": unquote(parsed.fragment) or f"导入的 {scheme.upper()} 节点",
+            "type": "http",
+            "server": parsed.hostname or "",
+            "port": parsed.port or (443 if scheme == "https" else 80),
+            "udp": False,
+        }
+        if scheme == "https":
+            config["tls"] = True
+        if parsed.username is not None:
+            config["username"] = unquote(parsed.username)
+        if parsed.password is not None:
+            config["password"] = unquote(parsed.password)
+        if bool_value(first(query, "skip-cert-verify", "allowInsecure", "insecure")):
+            config["skip-cert-verify"] = True
+        for query_name, config_name in (("sni", "sni"), ("fingerprint", "fingerprint"),
+                                        ("name-cert-verify", "name-cert-verify")):
+            value = first(query, query_name)
+            if value:
+                config[config_name] = value
+        headers = {}
+        host = first(query, "host")
+        user_agent = first(query, "user-agent", "ua")
+        if host:
+            headers["Host"] = host
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if headers:
+            config["headers"] = headers
+        if not config["server"] or not config["port"]:
+            raise ValueError("HTTP/HTTPS 链接中缺少服务器地址或端口")
+        return config
     if scheme in ("socks5", "socks"):
         parsed = urlsplit(link)
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -814,6 +849,10 @@ def parse_subscription_text(text):
             if node_type == "hy2":
                 node_type = "hysteria2"
                 node["type"] = node_type
+            elif node_type == "https":
+                node_type = "http"
+                node["type"] = node_type
+                node["tls"] = True
             if node_type not in SUPPORTED_NODE_TYPES:
                 skipped.append(str(node.get("name") or node_type or "未知协议"))
                 continue
@@ -848,7 +887,8 @@ def subscription_preview(payload):
     nodes, skipped = parse_subscription_text(fetch_subscription(payload.get("url")))
     protocols = {}
     for node in nodes:
-        protocols[node["type"]] = protocols.get(node["type"], 0) + 1
+        protocol = "https" if node.get("type") == "http" and node.get("tls") else node["type"]
+        protocols[protocol] = protocols.get(protocol, 0) + 1
     return {"total": len(nodes), "protocols": protocols, "skipped": skipped[:30],
             "groups": eligible_group_names(read_config())}
 
@@ -920,6 +960,29 @@ def node_to_uri(node):
     name = quote(str(node.get("name", "节点")), safe="")
     address = endpoint(node)
     query = {}
+    if node_type == "http":
+        scheme = "https" if node.get("tls") else "http"
+        if node.get("skip-cert-verify"):
+            query["skip-cert-verify"] = "true"
+        for config_name, query_name in (("sni", "sni"), ("fingerprint", "fingerprint"),
+                                        ("name-cert-verify", "name-cert-verify")):
+            if node.get(config_name):
+                query[query_name] = node[config_name]
+        headers = node.get("headers") or {}
+        if headers.get("Host") or headers.get("host"):
+            query["host"] = headers.get("Host") or headers.get("host")
+        if headers.get("User-Agent") or headers.get("user-agent"):
+            query["user-agent"] = headers.get("User-Agent") or headers.get("user-agent")
+        username = node.get("username")
+        password = node.get("password")
+        auth = ""
+        if username is not None or password is not None:
+            auth = quote(str(username or ""), safe="")
+            if password is not None:
+                auth += ":" + quote(str(password), safe="")
+            auth += "@"
+        suffix = "?" + urlencode(query) if query else ""
+        return f"{scheme}://{auth}{address}{suffix}#{name}"
     if node_type == "socks5":
         if node.get("udp") is False:
             query["udp"] = "false"
@@ -1107,6 +1170,15 @@ def mutate_node(method, payload):
         if not isinstance(config, dict):
             raise ValueError("节点配置必须是 JSON 对象")
         config = dict(config)
+        node_type = str(config.get("type", "")).lower()
+        if node_type == "https":
+            node_type = "http"
+            config["type"] = "http"
+            config["tls"] = True
+        if node_type not in SUPPORTED_NODE_TYPES:
+            raise ValueError("暂不支持该节点协议")
+        if node_type == "http":
+            config["udp"] = False
         name = str(config.get("name", "")).strip()
         if not name:
             raise ValueError("节点名称不能为空")

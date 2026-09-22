@@ -1095,7 +1095,7 @@ function overview() {
 
 function nodes() {
   let q = ($('search')?.value || '').toLowerCase();
-  let rows = S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + x.server).toLowerCase().includes(q));
+  let rows = S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + nodeProtocol(x) + ' ' + x.server).toLowerCase().includes(q));
   $('content').innerHTML = cards() + `
   <section class="panel">
     <div class="toolbar">
@@ -1119,7 +1119,7 @@ function nodes() {
             <tr data-node-name="${esc(x.name)}">
               <td><span class="drag-handle" draggable="true" title="拖动排序">↕</span> <code>${x.index + 1}</code></td>
               <td><b>${esc(x.name)}</b></td>
-              <td><code>${esc(x.type)}</code></td>
+              <td><code>${esc(nodeProtocol(x))}</code></td>
               <td>${esc(x.server)}</td>
               <td>${esc(x.port)}</td>
               <td>
@@ -1198,7 +1198,7 @@ function chains() {
             return `<tr>
               <td><b>${esc(x.name)}</b></td>
               <td><code>${esc(x.config['dialer-proxy'])}</code></td>
-              <td><code>${esc(x.type)}</code></td>
+              <td><code>${esc(nodeProtocol(x))}</code></td>
               <td>${esc(x.server)}:${esc(x.port)}</td>
               <td><span class="pill">${gs} 组</span></td>
               <td>
@@ -1663,6 +1663,8 @@ const OPTION_LABELS = {
   ss: 'Shadowsocks（加密代理）',
   vmess: 'VMess（V2Ray 协议）',
   socks5: 'SOCKS5（通用出口代理）',
+  http: 'HTTP（网页代理，仅 TCP）',
+  https: 'HTTPS（TLS 加密网页代理）',
   tcp: 'TCP（普通传输）',
   grpc: 'gRPC（多路复用传输）',
   ws: 'WebSocket（网页传输）',
@@ -1714,6 +1716,7 @@ const OPTION_LABELS = {
 };
 
 function optionLabel(x) { return OPTION_LABELS[x] || x; }
+function nodeProtocol(x) { return x?.type === 'http' && x?.config?.tls ? 'HTTPS' : optionLabel(x?.type || ''); }
 function options(items, current) {
   return items.map(x => `<option value="${esc(x)}" ${String(x) === String(current) ? 'selected' : ''}>${esc(optionLabel(x))}</option>`).join('');
 }
@@ -1804,6 +1807,25 @@ function protocolFields(type, cfg = {}) {
     </div>
     <div class="note">// 支持无认证或用户名/密码认证；作为链式代理出口时，在“链式代理”页面选择此节点为出口即可。</div>`;
 
+  if (type === 'http' || type === 'https') {
+    let headers = cfg.headers || {};
+    let secure = type === 'https';
+    return `
+    <h4 class="protocol-title">${secure ? 'HTTPS' : 'HTTP'} 代理认证与连接参数</h4>
+    <div class="grid">
+      <div><label>用户名（无认证可留空）</label><input id="nUsername" value="${esc(cfg.username || '')}"></div>
+      <div><label>密码（无认证可留空）</label><input id="nPassword" value="${esc(cfg.password || '')}"></div>
+      <div><label>Host 请求头（可选）</label><input id="nHttpHost" value="${esc(headers.Host || headers.host || '')}" placeholder="例如 proxy.example.com"></div>
+      <div><label>User-Agent 请求头（可选）</label><input id="nHttpUa" value="${esc(headers['User-Agent'] || headers['user-agent'] || '')}" placeholder="例如 Mozilla/5.0"></div>
+      ${secure ? `
+      <div><label>TLS SNI</label><input id="nSni" value="${esc(cfg.sni || '')}" placeholder="默认使用服务器域名"></div>
+      <div><label>证书域名校验（可选）</label><input id="nNameCertVerify" value="${esc(cfg['name-cert-verify'] || '')}" placeholder="例如 proxy.example.com"></div>
+      <div class="span2"><label>TLS 证书 SHA-256 指纹（可选）</label><input id="nCertFingerprint" value="${esc(cfg.fingerprint || '')}"></div>
+      <div class="span2 inlinecheck"><input id="nSkip" type="checkbox" ${cfg['skip-cert-verify'] ? 'checked' : ''}><span>跳过服务端证书验证 (skip-cert-verify)</span></div>` : ''}
+    </div>
+    <div class="note">// 标准 HTTP CONNECT 代理只支持 TCP；${secure ? '保存后写入 type: http 与 tls: true。' : '账号和密码均可留空。'}可在“链式代理”页面选作出口节点。</div>`;
+  }
+
   return `
     <h4 class="protocol-title">VMess 认证与传输参数</h4>
     <div class="grid">
@@ -1842,6 +1864,11 @@ function renderProtocol() {
   let box = $('protocolBox');
   if (box) {
     box.innerHTML = protocolFields(type, window.nodeDraft || {});
+    let udp = $('nUdp');
+    if (udp) {
+      udp.disabled = ['http', 'https'].includes(type);
+      if (udp.disabled) udp.checked = false;
+    }
     renderTransport();
   }
 }
@@ -1901,6 +1928,20 @@ function readNodeForm() {
     if (val('nSni')) cfg.servername = val('nSni'); else delete cfg.servername;
     cfg.tls = on('nTls');
     if (on('nSkip')) cfg['skip-cert-verify'] = true; else delete cfg['skip-cert-verify'];
+  } else if (type === 'http' || type === 'https') {
+    cfg.type = 'http';
+    cfg.udp = false;
+    if (type === 'https') cfg.tls = true; else delete cfg.tls;
+    if (val('nUsername')) cfg.username = val('nUsername'); else delete cfg.username;
+    if (val('nPassword')) cfg.password = val('nPassword'); else delete cfg.password;
+    if (val('nSni')) cfg.sni = val('nSni'); else delete cfg.sni;
+    if (val('nNameCertVerify')) cfg['name-cert-verify'] = val('nNameCertVerify'); else delete cfg['name-cert-verify'];
+    if (val('nCertFingerprint')) cfg.fingerprint = val('nCertFingerprint'); else delete cfg.fingerprint;
+    if (on('nSkip')) cfg['skip-cert-verify'] = true; else delete cfg['skip-cert-verify'];
+    let headers = {};
+    if (val('nHttpHost')) headers.Host = val('nHttpHost');
+    if (val('nHttpUa')) headers['User-Agent'] = val('nHttpUa');
+    if (Object.keys(headers).length) cfg.headers = headers; else delete cfg.headers;
   } else {
     cfg.uuid = val('nUuid');
     cfg.alterId = Number(val('nAlterId') || 0);
@@ -1926,6 +1967,7 @@ function readNodeForm() {
 function nodeModal(index) {
   let x = index == null ? null : S.data.nodes.find(n => n.index === index);
   let cfg = x?.config || { name: '', type: 'vless', server: '', port: 443, udp: true, tls: true };
+  let formType = cfg.type === 'http' && cfg.tls ? 'https' : cfg.type;
   let dialers = ['', ...S.data.nodes.filter(n => n.name !== x?.name).map(n => n.name), ...S.data.groups.filter(g => g.name !== x?.name && !g.name.includes('广告拦截')).map(g => g.name)];
   window.nodeDraft = cfg;
 
@@ -1940,7 +1982,7 @@ function nodeModal(index) {
         </div>
         <div>
           <label>协议类型</label>
-          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'socks5'], cfg.type || 'vless')}</select>
+          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'socks5', 'http', 'https'], formType || 'vless')}</select>
         </div>
         <div>
           <label>服务器域名 / IP</label>
@@ -2199,8 +2241,8 @@ function importNodeModal() {
   openModal('IMPORT_NODE // 一键通过链接导入单个节点', `
   <form id="editForm">
     <label>NODE_SHARE_LINK // 节点分享链接</label>
-    <textarea id="nodeLink" required style="min-height:120px" placeholder="粘贴 vless://、tuic://、hysteria2://、hy2://、trojan://、ss://、vmess://、socks5:// 或 socks:// 链接"></textarea>
-    <div class="note">// 系统将自动解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；SOCKS5 支持无认证及用户名/密码认证。</div>
+    <textarea id="nodeLink" required style="min-height:120px" placeholder="粘贴 vless://、tuic://、hysteria2://、hy2://、trojan://、ss://、vmess://、socks5://、socks://、http:// 或 https:// 链接"></textarea>
+    <div class="note">// 系统将自动解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；SOCKS5、HTTP、HTTPS 均支持无认证及用户名/密码认证。</div>
     <label class="inlinecheck">
       <input id="importAll" type="checkbox" checked>
       <span>自动加入所有业务代理策略组（广告拦截组除外）</span>
