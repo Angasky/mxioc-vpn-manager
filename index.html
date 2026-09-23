@@ -977,7 +977,8 @@ const S = {
   data: null,
   profiles: [],
   profile: localStorage.getItem('mxioc_profile') || 'clash',
-  nodeSelection: new Set()
+  nodeSelection: new Set(),
+  updatePrompted: ''
 };
 
 function notice(text) {
@@ -1022,6 +1023,103 @@ const jsonOpt = (method, body) => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 });
+
+const shortSha = value => value ? String(value).slice(0, 12) : '未记录';
+const updateTime = value => value ? new Date(value * 1000).toLocaleString() : '尚未检查';
+
+function updatePanel(status) {
+  let state = status.updating ? '正在安装更新' : status.available ? '发现新版本' : status.checkError ? '检查失败' : '当前已是最新版本';
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>SOFTWARE_UPDATE // 程序更新</h3>
+        <span class="pill">${esc(state)}</span>
+      </div>
+      <div class="grid">
+        <div><label>CURRENT_VERSION // 当前版本</label><code>${esc(shortSha(status.currentSha))}</code></div>
+        <div><label>LATEST_VERSION // 仓库最新版本</label><code>${esc(shortSha(status.latestSha))}</code></div>
+        <div><label>LAST_CHECK // 最近检查</label><span>${esc(updateTime(status.checkedAt))}</span></div>
+        <div><label>CHANGE // 更新说明</label><span>${esc(status.latestMessage || '暂无')}</span></div>
+      </div>
+      ${status.checkError ? `<div class="error">${esc(status.checkError)}</div>` : ''}
+      <div class="toolbar" style="margin-top:16px;">
+        <button class="btn" onclick="manualUpdateCheck()">[ ⟳ 立即检查 ]</button>
+        ${status.available ? '<button class="btn primary" onclick="confirmSoftwareUpdate()">[ ⬆ 立即更新 ]</button><button class="btn" onclick="dismissSoftwareUpdate()">[ 暂不更新 ]</button>' : ''}
+      </div>
+      <div class="note">系统每 24 小时自动检查一次 GitHub 仓库。只有点击“立即更新”才会安装；更新程序不会修改现有订阅、节点、规则、域名或证书。</div>
+    </section>`;
+}
+
+function showUpdatePrompt(status) {
+  S.updatePrompted = status.latestSha;
+  openModal('SOFTWARE_UPDATE // 发现项目更新', `
+    <div class="note">检测到 GitHub 仓库有新版本。更新只替换后台程序和内置模板，不会覆盖现有订阅配置。</div>
+    <div class="grid" style="margin-top:16px;">
+      <div><label>当前版本</label><code>${esc(shortSha(status.currentSha))}</code></div>
+      <div><label>最新版本</label><code>${esc(shortSha(status.latestSha))}</code></div>
+      <div class="span2"><label>更新说明</label><b>${esc(status.latestMessage || '仓库代码已更新')}</b></div>
+    </div>
+    <div class="toolbar" style="margin-top:18px;">
+      <button class="btn primary" onclick="confirmSoftwareUpdate()">[ ⬆ 立即更新 ]</button>
+      <button class="btn" onclick="dismissSoftwareUpdate()">[ 暂不更新此版本 ]</button>
+    </div>`);
+}
+
+async function checkUpdateNotice(force = false) {
+  try {
+    let status = force
+      ? await api('/updates/check', jsonOpt('POST', {}))
+      : await api('/updates');
+    if (status.available && !status.updating && S.updatePrompted !== status.latestSha) showUpdatePrompt(status);
+    return status;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function manualUpdateCheck() {
+  let status = await checkUpdateNotice(true);
+  if (!status) return alert('暂时无法连接仓库检查更新');
+  if (!status.available) notice(status.checkError ? '检查失败，请稍后重试' : '当前已经是最新版本');
+  if (S.page === 'system') system();
+}
+
+async function dismissSoftwareUpdate() {
+  try {
+    await api('/updates/dismiss', jsonOpt('POST', {}));
+    closeModal();
+    notice('已忽略本次版本；仓库出现下一次更新时会再次提醒');
+    if (S.page === 'system') system();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function confirmSoftwareUpdate() {
+  if (!confirm('确认安装仓库最新版本？现有订阅、节点、规则、域名和证书都会保留。')) return;
+  try {
+    let result = await api('/updates/apply', jsonOpt('POST', {}));
+    let target = result.task.sha;
+    closeModal();
+    notice('更新任务已启动，后台会自动重启……');
+    for (let i = 0; i < 300; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      try {
+        let status = await api('/updates');
+        if (status.currentSha === target && !status.updating) {
+          location.reload();
+          return;
+        }
+        if (!status.updating && status.lastResult?.ok === false) throw Error(status.lastResult.error || '更新失败');
+      } catch (error) {
+        if (error.message.includes('更新失败')) throw error;
+      }
+    }
+    alert('更新仍在后台执行，请稍后刷新页面查看版本状态');
+  } catch (error) {
+    alert(error.message);
+  }
+}
 
 async function loadProfiles() {
   let d = await api('/profiles');
@@ -1105,10 +1203,11 @@ function nodes() {
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
       <button type="button" class="btn small" onclick="selectAllNodes()">[ 全选全部 ]</button>
       <button type="button" class="btn small" onclick="clearNodeSelection()">[ 取消选择 ]</button>
+      <button type="button" class="btn small primary" onclick="autoAddCountryFlags()">[ 🌐 自动添加国旗 ]</button>
       <button id="bulkDeleteButton" type="button" class="btn small danger" onclick="bulkDeleteNodes()">[ 批量删除 ]</button>
       <span id="nodeSelectedCount" class="pill">已选择 0 个</span>
     </div>
-    <div class="note">“全选全部”会选择配置中的所有节点；表头复选框只选择当前搜索结果。拖动“↕”手柄或点击“↑ / ↓”可调整节点顺序，并同步所有策略组。</div>
+    <div class="note">“自动添加国旗”会处理已勾选节点；未勾选时处理全部节点。系统根据服务器公网 IP 判断国家，并自动去除名称开头已有的国旗后再添加，因此重复执行不会叠加国旗。</div>
     <div class="tablewrap">
       <table>
         <thead>
@@ -1629,8 +1728,10 @@ async function raw() {
 }
 
 async function system() {
-  let d = await api('/backups');
+  let [d, update] = await Promise.all([api('/backups'), api('/updates')]);
   $('content').innerHTML = `
+  ${updatePanel(update)}
+
   <section class="panel">
     <div class="panel-head">
       <h3>AUTH_SECURITY // 修改管理员登录凭证</h3>
@@ -2474,6 +2575,27 @@ async function bulkDeleteNodes() {
   }
 }
 
+async function autoAddCountryFlags() {
+  let names = [...S.nodeSelection];
+  let scope = names.length ? `已勾选的 ${names.length} 个节点` : `全部 ${S.data.nodes.length} 个节点`;
+  if (!S.data.nodes.length || !confirm(`将根据服务器公网 IP 为${scope}识别国家并规范化名称开头的国旗。\n\n重复执行不会重复添加国旗，是否继续？`)) return;
+  try {
+    notice('正在解析节点 IP 并识别国家，请稍候……');
+    let result = await api('/nodes/flags', jsonOpt('POST', { names }));
+    S.nodeSelection.clear();
+    await reload();
+    let text = `已更新 ${result.updated} 个节点，${result.unchanged} 个无需修改`;
+    if (result.skipped?.length) {
+      text += `，跳过 ${result.skipped.length} 个`;
+      alert(text + '\n\n' + result.skipped.slice(0, 20).map(x => `${x.name}：${x.reason}`).join('\n'));
+    } else {
+      notice(text);
+    }
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function deleteGroup(i) {
   let x = S.data.groups.find(n => n.index === i);
   if (confirm(`确认删除策略组“${x.name}”以及所有流向该组的路由规则？`)) {
@@ -2575,6 +2697,7 @@ $('loginForm').onsubmit = async e => {
     $('app').classList.remove('hidden');
     await loadProfiles();
     await go('overview');
+    await checkUpdateNotice();
   } catch (x) {
     $('loginError').textContent = x.message;
   }
@@ -2614,7 +2737,7 @@ $('add').onclick = () => ({
 
 $('login').classList.add('hidden');
 $('app').classList.remove('hidden');
-go('overview').catch(error => {
+go('overview').then(() => checkUpdateNotice()).catch(error => {
   if (!$('login').classList.contains('hidden')) return;
   notice('加载失败：' + error.message);
 });

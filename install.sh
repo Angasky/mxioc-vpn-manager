@@ -14,6 +14,7 @@ CERT_EMAIL=""
 ACCESS_URL=""
 SUBSCRIPTION_URL=""
 STAGE_DIR=""
+UPDATE_ONLY=0
 
 if [[ -t 1 ]]; then
     C_CYAN='\033[1;36m'
@@ -68,6 +69,7 @@ usage() {
   sudo bash install.sh                  交互菜单
   sudo bash install.sh --ip             IP 模式（HTTP）
   sudo bash install.sh --domain 域名    域名模式（HTTPS）
+  sudo bash install.sh --update-only    只更新后台程序，不修改现有配置和部署方式
 
 可选参数：
   --email 邮箱      Let's Encrypt 到期通知邮箱
@@ -106,6 +108,10 @@ parse_args() {
                 [[ $# -ge 2 ]] || fatal "--email 后必须填写邮箱"
                 CERT_EMAIL="$2"
                 shift 2
+                ;;
+            --update-only)
+                UPDATE_ONLY=1
+                shift
                 ;;
             --help|-h)
                 usage
@@ -325,6 +331,44 @@ install_application() {
     success "程序文件与 Python 环境安装完成"
 }
 
+write_release_version() {
+    local release_sha="${MXIOC_RELEASE_SHA:-}"
+    if [[ -z "${release_sha}" && -n "${SOURCE_ROOT:-}" ]] && command -v git >/dev/null 2>&1; then
+        release_sha="$(git -C "${SOURCE_ROOT}" rev-parse HEAD 2>/dev/null || true)"
+    fi
+    if [[ -z "${release_sha}" ]]; then
+        release_sha="$(curl -fsSL --connect-timeout 10 -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/Angasky/mxioc-vpn-manager/commits/main 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha", ""))' 2>/dev/null || true)"
+    fi
+    if [[ "${release_sha}" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
+        printf '%s\n' "${release_sha}" > "${APP_DIR}/version"
+        chmod 0644 "${APP_DIR}/version"
+    fi
+}
+
+perform_update_only() {
+    require_root
+    detect_system
+    install_packages
+    install_application
+    systemctl daemon-reload
+    systemctl enable "${APP_NAME}" >/dev/null 2>&1 || true
+    systemctl restart "${APP_NAME}"
+    local ready=0
+    local attempt
+    for attempt in {1..30}; do
+        if curl -fsS --max-time 2 http://127.0.0.1:62577/admin/ >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+    [[ "${ready}" == "1" ]] || fatal "新版本启动失败，版本号未更新，请查看服务日志。"
+    write_release_version
+    success "后台程序已更新；现有订阅、节点、规则、域名和证书均未修改"
+}
+
 create_initial_config() {
     [[ -s "${CONFIG_FILE}" ]] && {
         success "检测到现有订阅配置，已完整保留"
@@ -488,6 +532,10 @@ show_result() {
 
 main() {
     parse_args "$@"
+    if [[ "${UPDATE_ONLY}" == "1" ]]; then
+        perform_update_only
+        return
+    fi
     banner
     choose_mode
     require_root
@@ -498,6 +546,7 @@ main() {
     install_application
     create_initial_config
     install_service
+    write_release_version
     if [[ "${MODE}" == "domain" ]]; then
         configure_domain_mode
     else

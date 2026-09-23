@@ -5,12 +5,16 @@ import base64
 import json
 import os
 import copy
+import ipaddress
 import re
 import secrets
 import shutil
+import socket
+import subprocess
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,10 +50,24 @@ PROFILES_FILE = ROOT / "profiles.json"
 PROFILES_DIR = ROOT / "profiles"
 BACKUP_DIR = ROOT / "backups"
 SESSIONS_FILE = ROOT / "sessions.json"
+BUNDLED_VERSION_FILE = ROOT / "version"
+UPDATE_STATE_FILE = ROOT / "update-state.json"
+UPDATE_MARKER_FILE = ROOT / "update-in-progress.json"
+UPDATE_RESULT_FILE = ROOT / "update-result.json"
+UPDATE_INSTALLER_FILE = ROOT / ".updates" / "install.sh"
+UPDATE_RUNNER_FILE = ROOT / ".updates" / "run.sh"
+REPOSITORY = "Angasky/mxioc-vpn-manager"
+REPOSITORY_API = f"https://api.github.com/repos/{REPOSITORY}/commits/main"
+REPOSITORY_RAW = f"https://raw.githubusercontent.com/{REPOSITORY}"
 SESSIONS = None
 SESSION_LOCK = threading.RLock()
 SESSION_TTL = 30 * 24 * 3600
 LOCK = threading.RLock()
+UPDATE_LOCK = threading.RLock()
+GEO_LOCK = threading.RLock()
+GEO_RATE_LOCK = threading.Lock()
+GEO_CACHE = {}
+GEO_NEXT_REQUEST = 0.0
 CTX = threading.local()
 MAX_BODY = 2 * 1024 * 1024
 MAX_SUBSCRIPTION = 8 * 1024 * 1024
@@ -68,6 +86,156 @@ CONVERSION_FORMATS = {
         "note": "适合新版 Shadowrocket；旧版本可能无法识别 TUIC、Hysteria2 或 Reality。",
     },
 }
+
+
+def read_json_file(path, default=None):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else (default or {})
+    except Exception:
+        return default or {}
+
+
+def write_json_file(path, value, mode=0o600):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+        os.chmod(temp_name, mode)
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def current_version():
+    try:
+        return BUNDLED_VERSION_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def fetch_latest_release():
+    request = Request(REPOSITORY_API, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "mxioc-vpn-manager-update-checker",
+    })
+    with urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read(MAX_BODY).decode("utf-8"))
+    commit = payload.get("commit") or {}
+    return {
+        "latestSha": str(payload.get("sha", "")),
+        "latestMessage": str((commit.get("message") or "").splitlines()[0]),
+        "latestUrl": str(payload.get("html_url", "")),
+        "publishedAt": str(((commit.get("committer") or {}).get("date") or "")),
+    }
+
+
+def update_status(force=False):
+    with UPDATE_LOCK:
+        state = read_json_file(UPDATE_STATE_FILE)
+        now = int(time.time())
+        checked = int(state.get("checkedAt") or 0)
+        if force or not state.get("latestSha") or now - checked >= 24 * 3600:
+            try:
+                state.update(fetch_latest_release())
+                state["checkedAt"] = now
+                state.pop("checkError", None)
+                write_json_file(UPDATE_STATE_FILE, state)
+            except Exception as exc:
+                state["checkedAt"] = now
+                state["checkError"] = str(exc)
+                write_json_file(UPDATE_STATE_FILE, state)
+        current = current_version()
+        latest = str(state.get("latestSha") or "")
+        dismissed = str(state.get("dismissedSha") or "")
+        result = read_json_file(UPDATE_RESULT_FILE)
+        return {
+            "currentSha": current,
+            "latestSha": latest,
+            "latestMessage": state.get("latestMessage", ""),
+            "latestUrl": state.get("latestUrl", ""),
+            "publishedAt": state.get("publishedAt", ""),
+            "checkedAt": state.get("checkedAt", 0),
+            "checkError": state.get("checkError", ""),
+            "available": bool(latest and latest != current and latest != dismissed),
+            "dismissed": bool(latest and latest == dismissed),
+            "updating": UPDATE_MARKER_FILE.exists(),
+            "lastResult": result,
+        }
+
+
+def dismiss_update():
+    with UPDATE_LOCK:
+        status = update_status()
+        if status["latestSha"]:
+            state = read_json_file(UPDATE_STATE_FILE)
+            state["dismissedSha"] = status["latestSha"]
+            write_json_file(UPDATE_STATE_FILE, state)
+        return update_status()
+
+
+def start_update():
+    with UPDATE_LOCK:
+        status = update_status(force=True)
+        if status["updating"]:
+            raise ValueError("更新任务正在执行，请稍候")
+        sha = status["latestSha"]
+        if not sha:
+            raise ValueError("暂时无法获取仓库最新版本")
+        if sha == status["currentSha"]:
+            raise ValueError("当前已经是最新版本")
+        installer_url = f"{REPOSITORY_RAW}/{sha}/install.sh"
+        request = Request(installer_url, headers={"User-Agent": "mxioc-vpn-manager-updater"})
+        with urlopen(request, timeout=20) as response:
+            installer = response.read(MAX_BODY)
+        if not installer.startswith(b"#!/usr/bin/env bash"):
+            raise ValueError("下载的更新程序格式不正确")
+        UPDATE_INSTALLER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_INSTALLER_FILE.write_bytes(installer)
+        os.chmod(UPDATE_INSTALLER_FILE, 0o700)
+        marker = {"sha": sha, "startedAt": int(time.time())}
+        write_json_file(UPDATE_MARKER_FILE, marker)
+        runner = """#!/usr/bin/env bash
+set +e
+LOG=/opt/mxioc-rule-manager/update.log
+if /bin/bash /opt/mxioc-rule-manager/.updates/install.sh --update-only >>\"$LOG\" 2>&1; then
+  printf '{\"ok\":true,\"sha\":\"%s\"}\n' \"$MXIOC_RELEASE_SHA\" > /opt/mxioc-rule-manager/update-result.json
+  rc=0
+else
+  rc=$?
+  printf '{\"ok\":false,\"sha\":\"%s\",\"error\":\"更新失败，请查看 update.log\"}\n' \"$MXIOC_RELEASE_SHA\" > /opt/mxioc-rule-manager/update-result.json
+fi
+rm -f /opt/mxioc-rule-manager/update-in-progress.json /opt/mxioc-rule-manager/.updates/install.sh /opt/mxioc-rule-manager/.updates/run.sh
+exit "$rc"
+"""
+        UPDATE_RUNNER_FILE.write_text(runner, encoding="utf-8", newline="\n")
+        os.chmod(UPDATE_RUNNER_FILE, 0o700)
+        unit = "mxioc-self-update-" + sha[:12]
+        raw_base = f"{REPOSITORY_RAW}/{sha}"
+        try:
+            subprocess.Popen([
+                "systemd-run", "--unit", unit, "--collect", "--property=Type=oneshot",
+                f"--setenv=MXIOC_RAW_BASE={raw_base}", f"--setenv=MXIOC_RELEASE_SHA={sha}",
+                "/bin/bash", str(UPDATE_RUNNER_FILE),
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception:
+            UPDATE_MARKER_FILE.unlink(missing_ok=True)
+            UPDATE_INSTALLER_FILE.unlink(missing_ok=True)
+            UPDATE_RUNNER_FILE.unlink(missing_ok=True)
+            raise
+        return marker
+
+
+def update_checker_loop():
+    while True:
+        try:
+            update_status(force=True)
+        except Exception:
+            pass
+        threading.Event().wait(24 * 3600)
 
 
 PROFILES_CACHE = None
@@ -1165,6 +1333,122 @@ def replace_references(doc, old, new=None):
     doc["rules"] = updated
 
 
+LEADING_FLAGS = re.compile(r"^(?:[\U0001F1E6-\U0001F1FF]{2}\s*)+")
+
+
+def country_flag(country_code):
+    code = str(country_code or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", code):
+        return ""
+    return "".join(chr(0x1F1E6 + ord(char) - ord("A")) for char in code)
+
+
+def name_with_country_flag(name, flag):
+    clean = LEADING_FLAGS.sub("", str(name or "")).strip()
+    return f"{flag} {clean}" if flag and clean else clean
+
+
+def public_ip_for_server(server):
+    value = str(server or "").strip().strip("[]")
+    if not value:
+        raise ValueError("服务器地址为空")
+    try:
+        address = ipaddress.ip_address(value)
+        if not address.is_global:
+            raise ValueError("服务器地址不是公网 IP")
+        return str(address)
+    except ValueError as direct_error:
+        if any(char.isalpha() for char in value):
+            candidates = []
+            for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM):
+                candidate = item[4][0]
+                try:
+                    address = ipaddress.ip_address(candidate)
+                    if address.is_global and str(address) not in candidates:
+                        candidates.append(str(address))
+                except ValueError:
+                    continue
+            if candidates:
+                return candidates[0]
+            raise ValueError("域名没有解析到公网 IP")
+        raise direct_error
+
+
+def country_for_server(server):
+    global GEO_NEXT_REQUEST
+    address = public_ip_for_server(server)
+    with GEO_LOCK:
+        cached = GEO_CACHE.get(address)
+        if cached and time.time() - cached[0] < 7 * 24 * 3600:
+            return cached[1], address
+    request = Request(f"https://api.country.is/{quote(address, safe=':')}", headers={
+        "Accept": "application/json", "User-Agent": "mxioc-vpn-manager-geoip",
+    })
+    with GEO_RATE_LOCK:
+        delay = GEO_NEXT_REQUEST - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        GEO_NEXT_REQUEST = time.monotonic() + 0.12
+    with urlopen(request, timeout=10) as response:
+        payload = json.loads(response.read(64 * 1024).decode("utf-8"))
+    code = str(payload.get("country") or "").upper()
+    flag = country_flag(code)
+    if not flag:
+        raise ValueError("IP 国家识别服务未返回有效国家")
+    with GEO_LOCK:
+        GEO_CACHE[address] = (time.time(), code)
+    return code, address
+
+
+def add_country_flags(payload):
+    doc = read_config()
+    nodes = doc.setdefault("proxies", [])
+    requested = payload.get("names") or []
+    if not isinstance(requested, list):
+        raise ValueError("节点选择格式不正确")
+    selected = {str(name) for name in requested if str(name).strip()}
+    targets = [node for node in nodes if not selected or node.get("name") in selected]
+    if not targets:
+        raise ValueError("没有可处理的节点")
+
+    results = {}
+    servers = sorted({str(node.get("server", "")) for node in targets})
+    with ThreadPoolExecutor(max_workers=min(8, len(servers))) as executor:
+        futures = {executor.submit(country_for_server, server): server for server in servers}
+        for future in as_completed(futures):
+            server = futures[future]
+            try:
+                results[server] = future.result()
+            except Exception as exc:
+                results[server] = exc
+
+    existing = {node.get("name") for node in nodes}
+    renamed = []
+    skipped = []
+    for node in targets:
+        old = str(node.get("name", ""))
+        result = results.get(str(node.get("server", "")))
+        if isinstance(result, Exception):
+            skipped.append({"name": old, "reason": str(result)})
+            continue
+        code, address = result
+        new = name_with_country_flag(old, country_flag(code))
+        if new == old:
+            continue
+        if new in existing and new != old:
+            skipped.append({"name": old, "reason": f"添加国旗后名称与 {new} 重复"})
+            continue
+        existing.discard(old)
+        existing.add(new)
+        node["name"] = new
+        replace_references(doc, old, new)
+        renamed.append({"old": old, "new": new, "country": code, "ip": address})
+    if renamed:
+        write_config(doc, "country-flags")
+    return {"updated": len(renamed), "unchanged": len(targets) - len(renamed) - len(skipped),
+            "renamed": renamed, "skipped": skipped}
+
+
 def delete_nodes_from_doc(doc, names):
     if not isinstance(names, list):
         raise ValueError("请选择需要删除的节点")
@@ -1493,6 +1777,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/profiles":
                 self.json_out({"profiles": list_profiles()})
                 return
+            if path == "/admin/api/updates":
+                self.json_out(update_status())
+                return
             self.select_profile()
             if path == "/admin/api/snapshot":
                 self.json_out(snapshot())
@@ -1534,9 +1821,17 @@ class Handler(BaseHTTPRequestHandler):
             data = self.body()
             if path == "/admin/api/profiles":
                 return self.json_out({"ok": True, "profile": create_profile(data)})
+            if path == "/admin/api/updates/check":
+                return self.json_out({"ok": True, **update_status(force=True)})
+            if path == "/admin/api/updates/dismiss":
+                return self.json_out({"ok": True, **dismiss_update()})
+            if path == "/admin/api/updates/apply":
+                return self.json_out({"ok": True, "task": start_update()}, status=202)
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("POST", data)
             elif path == "/admin/api/nodes/move": move_node(data)
+            elif path == "/admin/api/nodes/flags":
+                return self.json_out({"ok": True, **add_country_flags(data)})
             elif path == "/admin/api/chains": mutate_chain("POST", data)
             elif path == "/admin/api/import-node":
                 config = parse_node_link(data.get("link", ""))
@@ -1625,4 +1920,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     load_profiles()
     load_auth()
+    threading.Thread(target=update_checker_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", 62577), Handler).serve_forever()
