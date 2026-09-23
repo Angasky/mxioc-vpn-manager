@@ -5,6 +5,7 @@
 ## 功能
 
 - 多订阅配置的新建、复制、重命名和删除
+- 内置完整的无节点 Clash 模板；新建空订阅时保留策略组、DNS 分流、广告与业务规则框架
 - VLESS、TUIC、Hysteria2、SOCKS5、HTTP、HTTPS 等节点的表单管理和链接导入
 - IPv4、标准 IPv6 及省略方括号的 IPv6 分享链接导入
 - 节点拖拽排序、上移/下移、复选框全选与安全批量删除，并同步策略组显示顺序
@@ -53,13 +54,14 @@ curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/inst
 curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --domain vpn.example.com --email admin@example.com
 ```
 
-重复执行安装器会更新程序，但会保留现有节点、规则、订阅配置、管理员账号及历史备份。
+重复执行安装器会更新程序和内置模板，但会保留现有节点、规则、订阅配置、管理员账号及历史备份。只有首次安装或在后台新建“空白模板”订阅时，才会使用 `templates/clash.yaml`。
 
 ## 手动安装
 
 ```bash
-sudo install -d -m 0755 /opt/mxioc-rule-manager
+sudo install -d -m 0755 /opt/mxioc-rule-manager/templates
 sudo install -m 0644 server.py index.html /opt/mxioc-rule-manager/
+sudo install -m 0644 templates/clash.yaml /opt/mxioc-rule-manager/templates/
 sudo python3 -m venv /opt/mxioc-rule-manager/venv
 sudo /opt/mxioc-rule-manager/venv/bin/python -m pip install -r requirements.txt
 sudo install -m 0644 deploy/mxioc-rule-manager.service /etc/systemd/system/

@@ -304,8 +304,9 @@ install_application() {
     stage_file index.html
     stage_file requirements.txt
     stage_file deploy/mxioc-rule-manager.service
+    stage_file templates/clash.yaml
 
-    install -d -m 0755 "${APP_DIR}" "${APP_DIR}/code-backups" "${CONFIG_DIR}"
+    install -d -m 0755 "${APP_DIR}" "${APP_DIR}/code-backups" "${APP_DIR}/templates" "${CONFIG_DIR}"
     local stamp
     stamp="$(date +%Y%m%d-%H%M%S)"
     [[ ! -f "${APP_DIR}/server.py" ]] || cp -- "${APP_DIR}/server.py" "${APP_DIR}/code-backups/server.py.${stamp}"
@@ -313,6 +314,7 @@ install_application() {
     install -m 0644 "${STAGE_DIR}/server.py" "${APP_DIR}/server.py"
     install -m 0644 "${STAGE_DIR}/index.html" "${APP_DIR}/index.html"
     install -m 0644 "${STAGE_DIR}/requirements.txt" "${APP_DIR}/requirements.txt"
+    install -m 0644 "${STAGE_DIR}/clash.yaml" "${APP_DIR}/templates/clash.yaml"
 
     if [[ ! -x "${APP_DIR}/venv/bin/python" ]]; then
         python3 -m venv "${APP_DIR}/venv"
@@ -329,37 +331,9 @@ create_initial_config() {
         return
     }
     info "创建初始 Clash/Mihomo 订阅配置……"
-    cat >"${CONFIG_FILE}" <<'YAML'
-mixed-port: 7890
-allow-lan: true
-mode: rule
-log-level: info
-ipv6: true
-proxies: []
-proxy-groups:
-  - name: ✈️ Proxy
-    type: select
-    proxies:
-      - DIRECT
-rules:
-  - MATCH,✈️ Proxy
-dns:
-  enable: true
-  ipv6: true
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  default-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-  nameserver:
-    - https://1.1.1.1/dns-query#✈️ Proxy
-    - https://dns.google/dns-query#✈️ Proxy
-  direct-nameserver:
-    - https://dns.alidns.com/dns-query
-    - https://doh.pub/dns-query
-YAML
+    cp -- "${APP_DIR}/templates/clash.yaml" "${CONFIG_FILE}"
     chmod 0644 "${CONFIG_FILE}"
-    success "初始订阅配置已创建"
+    success "已使用内置完整模板创建初始订阅配置"
 }
 
 install_service() {

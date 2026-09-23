@@ -1,0 +1,1061 @@
+mixed-port: 7890
+socks-port: 7891
+allow-lan: true
+bind-address: '*'
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+dns:
+  enable: true
+  cache-algorithm: arc
+  ipv6: false
+  prefer-h3: false
+  use-hosts: true
+  use-system-hosts: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: rule
+  fake-ip-filter:
+  - GEOSITE,private,real-ip
+  - MATCH,fake-ip
+  default-nameserver:
+  - 223.5.5.5
+  - 119.29.29.29
+  proxy-server-nameserver:
+  - https://dns.alidns.com/dns-query
+  - https://doh.pub/dns-query
+  direct-nameserver:
+  - https://dns.alidns.com/dns-query
+  - https://doh.pub/dns-query
+  direct-nameserver-follow-policy: false
+  nameserver-policy:
+    +.openai.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.chatgpt.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.claude.ai:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.gemini.google.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.bard.google.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.douyin.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.douyincdn.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.douyinpic.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.douyinstatic.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.douyinvod.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.amemv.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.iesdouyin.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.huoshan.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.byteimg.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.bytedance.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.byted-static.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.snssdk.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.tiktokshopglobalselling.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktokglobalshop.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktokshop.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.youtube.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.youtu.be:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.googlevideo.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.ytimg.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.youtube-nocookie.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.youtubei.googleapis.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.yt.be:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.x.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.twitter.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.t.co:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.twimg.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.twittercdn.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tweetdeck.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.periscope.tv:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.pscp.tv:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.whatsapp.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.whatsapp.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.wa.me:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.netflix.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.netflix.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.nflxext.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.nflximg.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.nflximg.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.nflxso.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.nflxvideo.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.fast.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktok.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktokv.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktokcdn.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tiktokcdn-us.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.musical.ly:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.muscdn.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.byteoversea.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.ibytedtos.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.sgpstatp.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.tik-tokapi.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.google.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.googleapis.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.gstatic.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.googleusercontent.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.lan:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.local:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.localhost:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.aiqiyi.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.bilibili.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.b23.tv:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.acg.tv:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.bahamut.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.steamcommunity.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.steampowered.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.steamgames.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.cloudflare.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.onedrive.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.live.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.microsoft.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.iqiyi.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.qiyi.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.qy.net:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.ppsimg.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.qiyipic.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.71edge.com:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.gamer.com.tw:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.cloudflare.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.1.1.1.1:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.1.0.0.1:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.live.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.office.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.office365.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.skype.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.msauth.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.msauthimages.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    geosite:geolocation-!cn:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    geosite:private:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    +.oracle.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oraclecloud.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oraclecloudapps.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oracleinfinity.io:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oraclecorp.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oracleonsrcloud.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oracleiaas.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oraclevcn.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oracleindustry.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oracleusercontent.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.oraclecloudmarketplace.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.java.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.java.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.mysql.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.mysql.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.virtualbox.org:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.sun.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.dyn.com:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.dynect.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    oracle.112.2o7.net:
+    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    '*.oracle.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.oraclecloud.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.cybersource.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.online-metrix.net':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.oracleinfinity.io':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.oracleimg.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.oraclecorp.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.bkrtx.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.en25.com':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    '*.omtrdc.net':
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  nameserver:
+  - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+  - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+proxies: []
+proxy-groups:
+- name: ✈️ Proxy
+  type: select
+  proxies:
+  - DIRECT
+- name: 🤖 ChatGPT
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: ▶️ YouTube
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 𝕏 X/推特
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 💬 WhatsApp
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 📘 Facebook
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: ✈️ Telegram
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 🎬 Netflix
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 📹 TikTok
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 🛍️ TIKTOK SHOP
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 🌏 爱奇艺&哔哩哔哩
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: 📺 动画疯
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 🎮 Steam 登录/下载
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: 🎮 Steam 商店/社区
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: 🌩️ Cloudflare
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: ☁️ OneDrive
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: ☁️ 甲骨文 Oracle
+  type: select
+  proxies:
+  - DIRECT
+  - ✈️ Proxy
+- name: 🛡️ 基础广告拦截
+  type: select
+  proxies:
+  - REJECT
+  - DIRECT
+- name: 🔥 强力广告拦截
+  type: select
+  proxies:
+  - DIRECT
+  - REJECT
+- name: 🎓 学术网站
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+rules:
+- PROCESS-NAME,WeChat.exe,DIRECT
+- PROCESS-NAME,Weixin.exe,DIRECT
+- PROCESS-NAME,WeChatAppEx.exe,DIRECT
+- PROCESS-NAME,WeChat,DIRECT
+- PROCESS-NAME,Weixin,DIRECT
+- PROCESS-NAME,com.tencent.mm,DIRECT
+- PROCESS-NAME,com.tencent.xin,DIRECT
+- DOMAIN-SUFFIX,wechat.com,DIRECT
+- DOMAIN-SUFFIX,weixin.qq.com,DIRECT
+- DOMAIN-SUFFIX,weixin.com,DIRECT
+- DOMAIN-SUFFIX,weixinbridge.com,DIRECT
+- DOMAIN-SUFFIX,wechatpay.com,DIRECT
+- DOMAIN-SUFFIX,qq.com,DIRECT
+- DOMAIN-SUFFIX,qpic.cn,DIRECT
+- DOMAIN-SUFFIX,qlogo.cn,DIRECT
+- DOMAIN-SUFFIX,gtimg.cn,DIRECT
+- DOMAIN-SUFFIX,tenpay.com,DIRECT
+- DOMAIN-SUFFIX,tencent.com,DIRECT
+- DOMAIN-SUFFIX,tencentcloud.com,DIRECT
+- DOMAIN-SUFFIX,truste.com,DIRECT
+- DOMAIN-SUFFIX,custhelp.com,DIRECT
+- DOMAIN-SUFFIX,adobedtm.com,DIRECT
+- DOMAIN-SUFFIX,oraclecorp.com,DIRECT
+- DOMAIN-SUFFIX,oracleimg.com,DIRECT
+- DOMAIN-SUFFIX,omtrdc.net,DIRECT
+- DOMAIN-SUFFIX,en25.com,DIRECT
+- DOMAIN-SUFFIX,bkrtx.com,DIRECT
+- DOMAIN-SUFFIX,online-metrix.net,DIRECT
+- DOMAIN-SUFFIX,cybersource.com,DIRECT
+- DOMAIN-SUFFIX,oracleinfinity.io,DIRECT
+- DOMAIN-SUFFIX,oraclecloud.com,DIRECT
+- DOMAIN-SUFFIX,oracle.com,DIRECT
+- DOMAIN-KEYWORD,stun,REJECT
+- AND,((NETWORK,UDP),(DST-PORT,3478-3481)),REJECT
+- AND,((NETWORK,UDP),(DST-PORT,5349)),REJECT
+- AND,((NETWORK,UDP),(DST-PORT,19302-19309)),REJECT
+- DOMAIN-SUFFIX,googleadservices.com,🛡️ 基础广告拦截
+- DOMAIN-SUFFIX,googlesyndication.com,🛡️ 基础广告拦截
+- DOMAIN-SUFFIX,google-analytics.com,🛡️ 基础广告拦截
+- DOMAIN-SUFFIX,googletagmanager.com,🛡️ 基础广告拦截
+- DOMAIN-SUFFIX,doubleclick.net,🛡️ 基础广告拦截
+- DOMAIN,adservice.google.com,🛡️ 基础广告拦截
+- DOMAIN,imasdk.googleapis.com,🛡️ 基础广告拦截
+- DOMAIN,ads.youtube.com,🛡️ 基础广告拦截
+- DOMAIN,ads-api.twitter.com,🛡️ 基础广告拦截
+- DOMAIN,analytics.twitter.com,🛡️ 基础广告拦截
+- DOMAIN,ads.tiktok.com,🛡️ 基础广告拦截
+- DOMAIN,analytics-sg.tiktok.com,🛡️ 基础广告拦截
+- DOMAIN-SUFFIX,browserleaks.com,✈️ Proxy
+- DOMAIN-SUFFIX,oracle.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oraclecloud.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oraclecloudapps.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oracleinfinity.io,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oraclecorp.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oracleonsrcloud.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oracleiaas.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oraclevcn.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oracleindustry.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oracleusercontent.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,oraclecloudmarketplace.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,java.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,java.net,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,mysql.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,mysql.net,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,virtualbox.org,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,sun.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,dyn.com,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,dynect.net,☁️ 甲骨文 Oracle
+- DOMAIN,oracle.112.2o7.net,☁️ 甲骨文 Oracle
+- DOMAIN-KEYWORD,oracle,☁️ 甲骨文 Oracle
+- DOMAIN-SUFFIX,feishu.cn,DIRECT
+- DOMAIN-SUFFIX,feishu.cn,DIRECT
+- DOMAIN-SUFFIX,feishuapp.cn,DIRECT
+- DOMAIN-SUFFIX,todesk.com,DIRECT
+- DOMAIN-SUFFIX,todesk.cn,DIRECT
+- DOMAIN-SUFFIX,qqmail.com,DIRECT
+- DOMAIN-SUFFIX,openai.com,🤖 ChatGPT
+- DOMAIN-SUFFIX,chatgpt.com,🤖 ChatGPT
+- DOMAIN-SUFFIX,claude.ai,🤖 ChatGPT
+- DOMAIN-SUFFIX,gemini.google.com,✈️ Proxy
+- DOMAIN-SUFFIX,bard.google.com,🤖 ChatGPT
+- DOMAIN-KEYWORD,openai,🤖 ChatGPT
+- DOMAIN-KEYWORD,anthropic,🤖 ChatGPT
+- DOMAIN-SUFFIX,douyin.com,DIRECT
+- DOMAIN-SUFFIX,douyincdn.com,DIRECT
+- DOMAIN-SUFFIX,douyinpic.com,DIRECT
+- DOMAIN-SUFFIX,douyinstatic.com,DIRECT
+- DOMAIN-SUFFIX,douyinvod.com,DIRECT
+- DOMAIN-SUFFIX,amemv.com,DIRECT
+- DOMAIN-SUFFIX,iesdouyin.com,DIRECT
+- DOMAIN-SUFFIX,huoshan.com,DIRECT
+- DOMAIN-SUFFIX,byteimg.com,DIRECT
+- DOMAIN-SUFFIX,bytedance.com,DIRECT
+- DOMAIN-SUFFIX,byted-static.com,DIRECT
+- DOMAIN-SUFFIX,snssdk.com,DIRECT
+- DOMAIN-SUFFIX,tiktokshopglobalselling.com,🛍️ TIKTOK SHOP
+- DOMAIN-SUFFIX,tiktokglobalshop.com,🛍️ TIKTOK SHOP
+- DOMAIN-SUFFIX,tiktokshop.com,🛍️ TIKTOK SHOP
+- DOMAIN-SUFFIX,youtube.com,▶️ YouTube
+- DOMAIN-SUFFIX,youtu.be,▶️ YouTube
+- DOMAIN-SUFFIX,googlevideo.com,▶️ YouTube
+- DOMAIN-SUFFIX,ytimg.com,▶️ YouTube
+- DOMAIN-SUFFIX,youtube-nocookie.com,▶️ YouTube
+- DOMAIN-SUFFIX,youtubei.googleapis.com,▶️ YouTube
+- DOMAIN-SUFFIX,yt.be,▶️ YouTube
+- DOMAIN-SUFFIX,x.com,𝕏 X/推特
+- DOMAIN-SUFFIX,twitter.com,𝕏 X/推特
+- DOMAIN-SUFFIX,t.co,𝕏 X/推特
+- DOMAIN-SUFFIX,twimg.com,𝕏 X/推特
+- DOMAIN-SUFFIX,twittercdn.com,𝕏 X/推特
+- DOMAIN-SUFFIX,tweetdeck.com,𝕏 X/推特
+- DOMAIN-SUFFIX,periscope.tv,𝕏 X/推特
+- DOMAIN-SUFFIX,pscp.tv,𝕏 X/推特
+- DOMAIN-SUFFIX,whatsapp.com,💬 WhatsApp
+- DOMAIN-SUFFIX,whatsapp.net,💬 WhatsApp
+- DOMAIN-SUFFIX,wa.me,💬 WhatsApp
+- PROCESS-NAME,com.facebook.katana,📘 Facebook
+- PROCESS-NAME,com.facebook.lite,📘 Facebook
+- PROCESS-NAME,com.facebook.orca,📘 Facebook
+- GEOSITE,facebook,📘 Facebook
+- DOMAIN-SUFFIX,facebook.com,📘 Facebook
+- DOMAIN-SUFFIX,facebook.net,📘 Facebook
+- DOMAIN-SUFFIX,facebookmail.com,📘 Facebook
+- DOMAIN-SUFFIX,fb.com,📘 Facebook
+- DOMAIN-SUFFIX,fb.me,📘 Facebook
+- DOMAIN-SUFFIX,fbcdn.com,📘 Facebook
+- DOMAIN-SUFFIX,fbcdn.net,📘 Facebook
+- DOMAIN-SUFFIX,fbsbx.com,📘 Facebook
+- DOMAIN-SUFFIX,fb.watch,📘 Facebook
+- DOMAIN-SUFFIX,m.me,📘 Facebook
+- DOMAIN-SUFFIX,messenger.com,📘 Facebook
+- DOMAIN-SUFFIX,meta.com,📘 Facebook
+- PROCESS-NAME,Telegram.exe,✈️ Telegram
+- PROCESS-NAME,Telegram,✈️ Telegram
+- PROCESS-NAME,org.telegram.messenger,✈️ Telegram
+- PROCESS-NAME,org.telegram.messenger.web,✈️ Telegram
+- PROCESS-NAME,org.thunderdog.challegram,✈️ Telegram
+- GEOSITE,telegram,✈️ Telegram
+- DOMAIN-SUFFIX,telegram.org,✈️ Telegram
+- DOMAIN-SUFFIX,telegram.me,✈️ Telegram
+- DOMAIN-SUFFIX,telegram.dog,✈️ Telegram
+- DOMAIN-SUFFIX,t.me,✈️ Telegram
+- DOMAIN-SUFFIX,tdesktop.com,✈️ Telegram
+- DOMAIN-SUFFIX,telegra.ph,✈️ Telegram
+- DOMAIN-SUFFIX,telesco.pe,✈️ Telegram
+- DOMAIN-SUFFIX,telegram-cdn.org,✈️ Telegram
+- DOMAIN-SUFFIX,cdn-telegram.org,✈️ Telegram
+- IP-CIDR,91.108.4.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,91.108.8.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,91.108.12.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,91.108.16.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,91.108.20.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,91.108.56.0/22,✈️ Telegram,no-resolve
+- IP-CIDR,149.154.160.0/20,✈️ Telegram,no-resolve
+- IP-CIDR6,2001:67c:4e8::/48,✈️ Telegram,no-resolve
+- IP-CIDR6,2001:b28:f23c::/47,✈️ Telegram,no-resolve
+- IP-CIDR6,2001:b28:f23f::/48,✈️ Telegram,no-resolve
+- DOMAIN-SUFFIX,netflix.com,🎬 Netflix
+- DOMAIN-SUFFIX,netflix.net,🎬 Netflix
+- DOMAIN-SUFFIX,nflxext.com,🎬 Netflix
+- DOMAIN-SUFFIX,nflximg.com,🎬 Netflix
+- DOMAIN-SUFFIX,nflximg.net,🎬 Netflix
+- DOMAIN-SUFFIX,nflxso.net,🎬 Netflix
+- DOMAIN-SUFFIX,nflxvideo.net,🎬 Netflix
+- DOMAIN-SUFFIX,fast.com,🎬 Netflix
+- DOMAIN-SUFFIX,tiktok.com,📹 TikTok
+- DOMAIN-SUFFIX,tiktokv.com,📹 TikTok
+- DOMAIN-SUFFIX,tiktokcdn.com,📹 TikTok
+- DOMAIN-SUFFIX,tiktokcdn-us.com,📹 TikTok
+- DOMAIN-SUFFIX,musical.ly,📹 TikTok
+- DOMAIN-SUFFIX,muscdn.com,📹 TikTok
+- DOMAIN-SUFFIX,byteoversea.com,📹 TikTok
+- DOMAIN-SUFFIX,ibytedtos.com,📹 TikTok
+- DOMAIN-SUFFIX,sgpstatp.com,📹 TikTok
+- DOMAIN-SUFFIX,tik-tokapi.com,📹 TikTok
+- DOMAIN-KEYWORD,tiktok,📹 TikTok
+- DOMAIN-SUFFIX,google.com,✈️ Proxy
+- DOMAIN-SUFFIX,googleapis.com,✈️ Proxy
+- DOMAIN-SUFFIX,gstatic.com,✈️ Proxy
+- DOMAIN-SUFFIX,googleusercontent.com,✈️ Proxy
+- DOMAIN-KEYWORD,google,✈️ Proxy
+- IP-CIDR,0.0.0.0/8,DIRECT,no-resolve
+- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+- IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+- IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+- IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+- IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+- IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+- IP-CIDR6,::1/128,DIRECT,no-resolve
+- IP-CIDR6,fc00::/7,DIRECT,no-resolve
+- IP-CIDR6,fe80::/10,DIRECT,no-resolve
+- IP-CIDR6,fd00::/8,DIRECT,no-resolve
+- DOMAIN-SUFFIX,lan,DIRECT
+- DOMAIN-SUFFIX,local,DIRECT
+- DOMAIN-SUFFIX,localhost,DIRECT
+- RULE-SET,anti-ad-basic,🛡️ 基础广告拦截
+- RULE-SET,safe-import-ads-ip,🛡️ 基础广告拦截
+- RULE-SET,advertising-lite-strong,🔥 强力广告拦截
+- GEOSITE,CN,DIRECT
+- RULE-SET,safe-import-iqiyi-domain,🌏 爱奇艺&哔哩哔哩
+- RULE-SET,safe-import-bahamut-domain,📺 动画疯
+- RULE-SET,safe-import-steam-download-domain,🎮 Steam 登录/下载
+- RULE-SET,safe-import-steam-store-domain,🎮 Steam 商店/社区
+- RULE-SET,safe-import-onedrive-domain,☁️ OneDrive
+- RULE-SET,safe-import-cloudflare-domain,🌩️ Cloudflare
+- RULE-SET,safe-import-academic-domain,🎓 学术网站
+- RULE-SET,safe-import-domestic-domain,DIRECT
+- RULE-SET,safe-import-direct-domain,DIRECT
+- RULE-SET,safe-import-proxy-domain,✈️ Proxy
+- RULE-SET,safe-import-iqiyi-ip,🌏 爱奇艺&哔哩哔哩
+- RULE-SET,safe-import-domestic-ip,DIRECT
+- RULE-SET,safe-import-cloudflare-ip,🌩️ Cloudflare
+- RULE-SET,safe-import-proxy-ip,✈️ Proxy
+- GEOIP,CN,DIRECT
+- DOMAIN-SUFFIX,aiqiyi.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,bilibili.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,b23.tv,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,acg.tv,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-KEYWORD,bahamut,📺 动画疯
+- DOMAIN-SUFFIX,bahamut.com,📺 动画疯
+- DOMAIN-KEYWORD,steam,🎮 Steam 登录/下载
+- DOMAIN-KEYWORD,steamcommunity,🎮 Steam 商店/社区
+- DOMAIN-SUFFIX,steamcommunity.com,🎮 Steam 商店/社区
+- DOMAIN-SUFFIX,steampowered.com,🎮 Steam 商店/社区
+- DOMAIN-SUFFIX,steamgames.com,🎮 Steam 商店/社区
+- DOMAIN-KEYWORD,cloudflare,🌩️ Cloudflare
+- DOMAIN-SUFFIX,cloudflare.com,🌩️ Cloudflare
+- DOMAIN-KEYWORD,onedrive,☁️ OneDrive
+- DOMAIN-SUFFIX,onedrive.com,☁️ OneDrive
+- DOMAIN-SUFFIX,live.com,☁️ OneDrive
+- DOMAIN-SUFFIX,microsoft.com,☁️ OneDrive
+- DOMAIN-SUFFIX,iqiyi.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,qiyi.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,qy.net,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,ppsimg.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,qiyipic.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,71edge.com,🌏 爱奇艺&哔哩哔哩
+- DOMAIN-SUFFIX,gamer.com.tw,📺 动画疯
+- DOMAIN-SUFFIX,cloudflare.net,🌩️ Cloudflare
+- DOMAIN-SUFFIX,1.1.1.1,🌩️ Cloudflare
+- DOMAIN-SUFFIX,1.0.0.1,🌩️ Cloudflare
+- DOMAIN-SUFFIX,live.net,☁️ OneDrive
+- DOMAIN-SUFFIX,office.com,☁️ OneDrive
+- DOMAIN-SUFFIX,office365.com,☁️ OneDrive
+- DOMAIN-SUFFIX,skype.com,☁️ OneDrive
+- DOMAIN-SUFFIX,msauth.net,☁️ OneDrive
+- DOMAIN-SUFFIX,msauthimages.net,☁️ OneDrive
+- MATCH,✈️ Proxy
+hosts:
+  time.facebook.com: 17.253.84.125
+  time.android.com: 17.253.84.125
+ipv6: false
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+  - any:53
+  - tcp://any:53
+  strict-route: true
+rule-providers:
+  safe-import-iqiyi-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-iqiyi-domain.yaml
+    path: ./ruleset/safe-import-iqiyi-domain.yaml
+    interval: 86400
+  safe-import-bahamut-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-bahamut-domain.yaml
+    path: ./ruleset/safe-import-bahamut-domain.yaml
+    interval: 86400
+  safe-import-steam-download-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-steam-download-domain.yaml
+    path: ./ruleset/safe-import-steam-download-domain.yaml
+    interval: 86400
+  safe-import-steam-store-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-steam-store-domain.yaml
+    path: ./ruleset/safe-import-steam-store-domain.yaml
+    interval: 86400
+  safe-import-onedrive-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-onedrive-domain.yaml
+    path: ./ruleset/safe-import-onedrive-domain.yaml
+    interval: 86400
+  safe-import-academic-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-academic-domain.yaml
+    path: ./ruleset/safe-import-academic-domain.yaml
+    interval: 86400
+  safe-import-domestic-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-domestic-domain.yaml
+    path: ./ruleset/safe-import-domestic-domain.yaml
+    interval: 86400
+  safe-import-direct-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-direct-domain.yaml
+    path: ./ruleset/safe-import-direct-domain.yaml
+    interval: 86400
+  safe-import-proxy-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-proxy-domain.yaml
+    path: ./ruleset/safe-import-proxy-domain.yaml
+    interval: 86400
+  safe-import-iqiyi-ip:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-iqiyi-ip.yaml
+    path: ./ruleset/safe-import-iqiyi-ip.yaml
+    interval: 86400
+  safe-import-ads-ip:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-ads-ip.yaml
+    path: ./ruleset/safe-import-ads-ip.yaml
+    interval: 86400
+  safe-import-domestic-ip:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-domestic-ip.yaml
+    path: ./ruleset/safe-import-domestic-ip.yaml
+    interval: 86400
+  safe-import-cloudflare-ip:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-cloudflare-ip.yaml
+    path: ./ruleset/safe-import-cloudflare-ip.yaml
+    interval: 86400
+  safe-import-proxy-ip:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-proxy-ip.yaml
+    path: ./ruleset/safe-import-proxy-ip.yaml
+    interval: 86400
+  safe-import-cloudflare-domain:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/safe-import-cloudflare-domain.yaml
+    path: ./ruleset/safe-import-cloudflare-domain.yaml
+    interval: 86400
+  anti-ad-basic:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/anti-ad-basic.yaml
+    path: ./ruleset/anti-ad-basic.yaml
+    interval: 86400
+  advertising-lite-strong:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://vpn.mxvv.cn/rules/clash/advertising-lite-strong.yaml
+    path: ./ruleset/advertising-lite-strong.yaml
+    interval: 86400
+find-process-mode: strict

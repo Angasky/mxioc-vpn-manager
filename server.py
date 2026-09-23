@@ -35,6 +35,7 @@ def yaml_dump(data):
 
 ROOT = Path("/opt/mxioc-rule-manager")
 FRONT = ROOT / "index.html"
+BUNDLED_TEMPLATE = ROOT / "templates" / "clash.yaml"
 AUTH = Path("/etc/mxioc-rule-manager.auth.json")
 LEGACY_AUTH = Path("/etc/mxioc-rule-manager.auth")
 FILES = [
@@ -120,7 +121,7 @@ def current_files(profile_id=None):
     return [Path(x) for x in record.get("files", [])]
 
 
-def empty_profile_config():
+def minimal_profile_config():
     return {
         "mixed-port": 7890, "allow-lan": True, "mode": "rule", "log-level": "info",
         "ipv6": False, "proxies": [],
@@ -134,6 +135,18 @@ def empty_profile_config():
                 "direct-nameserver": ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"],
                 "direct-nameserver-follow-policy": False, "nameserver-policy": {}}
     }
+
+
+def empty_profile_config(template_path=None):
+    """Return a fresh copy of the bundled, node-free Clash template."""
+    path = Path(template_path) if template_path is not None else BUNDLED_TEMPLATE
+    if not path.is_file():
+        return minimal_profile_config()
+    doc = yaml_load(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        raise ValueError("内置 Clash 模板不是有效的 YAML 对象")
+    validate_config(doc)
+    return copy.deepcopy(doc)
 
 
 def public_profile(record):

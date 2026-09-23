@@ -11,6 +11,7 @@ initial-password.txt
 *.yml
 !.github/**/*.yml
 !examples/**/*.yaml
+!templates/clash.yaml
 
 # Local maintenance scripts may contain production node data
 work/*
