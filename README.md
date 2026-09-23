@@ -30,12 +30,38 @@
 - Nginx（用于 HTTPS 和反向代理）
 - systemd（推荐）
 
-## 安装
+## 一键部署（推荐）
+
+以 root 身份运行以下命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash
+```
+
+安装器会显示 MXIOC 字符菜单，并提供两种模式：
+
+- IP 部署：自动检测服务器公网 IP，通过 HTTP 地址访问。
+- 域名 HTTPS 部署：检查域名全部 A/AAAA 记录是否指向当前服务器，通过后自动申请 Let's Encrypt 证书、绑定 Nginx 并启用续期。
+
+也可以跳过菜单直接指定模式：
+
+```bash
+# IP 模式
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --ip
+
+# 域名 HTTPS 模式
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --domain vpn.example.com --email admin@example.com
+```
+
+重复执行安装器会更新程序，但会保留现有节点、规则、订阅配置、管理员账号及历史备份。
+
+## 手动安装
 
 ```bash
 sudo install -d -m 0755 /opt/mxioc-rule-manager
 sudo install -m 0644 server.py index.html /opt/mxioc-rule-manager/
-sudo python3 -m pip install -r requirements.txt
+sudo python3 -m venv /opt/mxioc-rule-manager/venv
+sudo /opt/mxioc-rule-manager/venv/bin/python -m pip install -r requirements.txt
 sudo install -m 0644 deploy/mxioc-rule-manager.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mxioc-rule-manager
