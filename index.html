@@ -750,7 +750,7 @@ code {
   background: #0e172a;
   border-color: rgba(56, 189, 248, 0.2);
 }
-.choice input, .inlinecheck input {
+.choice input, .inlinecheck input, .node-select, #nodeSelectAll {
   width: auto;
   margin: 0;
   accent-color: var(--blue);
@@ -976,7 +976,8 @@ const S = {
   page: 'overview',
   data: null,
   profiles: [],
-  profile: localStorage.getItem('mxioc_profile') || 'clash'
+  profile: localStorage.getItem('mxioc_profile') || 'clash',
+  nodeSelection: new Set()
 };
 
 function notice(text) {
@@ -1032,6 +1033,8 @@ async function loadProfiles() {
 
 async function reload(render = true) {
   S.data = await api('/snapshot');
+  let existing = new Set(S.data.nodes.map(node => node.name));
+  S.nodeSelection = new Set([...S.nodeSelection].filter(name => existing.has(name)));
   if (render) draw();
 }
 
@@ -1100,12 +1103,17 @@ function nodes() {
   <section class="panel">
     <div class="toolbar">
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
+      <button type="button" class="btn small" onclick="selectAllNodes()">[ 全选全部 ]</button>
+      <button type="button" class="btn small" onclick="clearNodeSelection()">[ 取消选择 ]</button>
+      <button id="bulkDeleteButton" type="button" class="btn small danger" onclick="bulkDeleteNodes()">[ 批量删除 ]</button>
+      <span id="nodeSelectedCount" class="pill">已选择 0 个</span>
     </div>
-    <div class="note">拖动左侧“↕”手柄可调整节点顺序，也可以点击“↑ / ↓”逐项移动；保存后会同步更新订阅及所有策略组中的节点排列。</div>
+    <div class="note">“全选全部”会选择配置中的所有节点；表头复选框只选择当前搜索结果。拖动“↕”手柄或点击“↑ / ↓”可调整节点顺序，并同步所有策略组。</div>
     <div class="tablewrap">
       <table>
         <thead>
           <tr>
+            <th><input id="nodeSelectAll" type="checkbox" aria-label="全选当前节点" onchange="toggleAllVisibleNodes(this.checked)"></th>
             <th>ORDER</th>
             <th>NODE_NAME</th>
             <th>PROTOCOL</th>
@@ -1117,6 +1125,7 @@ function nodes() {
         <tbody id="nodeRows">
           ${rows.map(x => `
             <tr data-node-name="${esc(x.name)}">
+              <td><input class="node-select" type="checkbox" data-node-select="${esc(x.name)}" aria-label="选择 ${esc(x.name)}" onchange="toggleNodeSelection(this)"></td>
               <td><span class="drag-handle" draggable="true" title="拖动排序">↕</span> <code>${x.index + 1}</code></td>
               <td><b>${esc(x.name)}</b></td>
               <td><code>${esc(nodeProtocol(x))}</code></td>
@@ -1128,13 +1137,52 @@ function nodes() {
                 <button class="btn small" onclick="nodeModal(${x.index})">[ 编辑 ]</button>
                 <button class="btn small danger" onclick="deleteNode(${x.index})">[ 删除 ]</button>
               </td>
-            </tr>`).join('') || '<tr><td colspan="6" class="empty">未找到匹配的节点</td></tr>'}
+            </tr>`).join('') || '<tr><td colspan="7" class="empty">未找到匹配的节点</td></tr>'}
         </tbody>
       </table>
     </div>
   </section>`;
   $('search').oninput = nodes;
   setupNodeDrag();
+  updateNodeSelectionUi();
+}
+
+function updateNodeSelectionUi() {
+  let boxes = [...document.querySelectorAll('.node-select')];
+  boxes.forEach(box => { box.checked = S.nodeSelection.has(box.dataset.nodeSelect); });
+  let selectedVisible = boxes.filter(box => box.checked).length;
+  let master = $('nodeSelectAll');
+  if (master) {
+    master.disabled = boxes.length === 0;
+    master.checked = boxes.length > 0 && selectedVisible === boxes.length;
+    master.indeterminate = selectedVisible > 0 && selectedVisible < boxes.length;
+  }
+  if ($('nodeSelectedCount')) $('nodeSelectedCount').textContent = `已选择 ${S.nodeSelection.size} 个`;
+  if ($('bulkDeleteButton')) $('bulkDeleteButton').disabled = S.nodeSelection.size === 0;
+}
+
+function toggleNodeSelection(input) {
+  if (input.checked) S.nodeSelection.add(input.dataset.nodeSelect);
+  else S.nodeSelection.delete(input.dataset.nodeSelect);
+  updateNodeSelectionUi();
+}
+
+function toggleAllVisibleNodes(checked) {
+  document.querySelectorAll('.node-select').forEach(box => {
+    if (checked) S.nodeSelection.add(box.dataset.nodeSelect);
+    else S.nodeSelection.delete(box.dataset.nodeSelect);
+  });
+  updateNodeSelectionUi();
+}
+
+function selectAllNodes() {
+  S.data.nodes.forEach(node => S.nodeSelection.add(node.name));
+  updateNodeSelectionUi();
+}
+
+function clearNodeSelection() {
+  S.nodeSelection.clear();
+  updateNodeSelectionUi();
 }
 
 function setupNodeDrag() {
@@ -2402,11 +2450,27 @@ async function deleteNode(i) {
   if (confirm(`确认删除节点“${x.name}”并自动清理全部策略组中的引用？`)) {
     try {
       await api('/nodes', jsonOpt('DELETE', { name: x.name }));
+      S.nodeSelection.delete(x.name);
       await reload();
       notice('节点已成功删除');
     } catch (e) {
       alert(e.message);
     }
+  }
+}
+
+async function bulkDeleteNodes() {
+  let names = [...S.nodeSelection];
+  if (!names.length) return;
+  let preview = names.slice(0, 8).join('、') + (names.length > 8 ? ` 等 ${names.length} 个节点` : '');
+  if (!confirm(`确认批量删除以下节点并清理全部策略组和路由引用？\n\n${preview}`)) return;
+  try {
+    let result = await api('/nodes/bulk', jsonOpt('DELETE', { names }));
+    S.nodeSelection.clear();
+    await reload();
+    notice(`已安全删除 ${result.deleted} 个节点`);
+  } catch (error) {
+    alert(error.message);
   }
 }
 
@@ -2526,6 +2590,7 @@ $('manageProfiles').onclick = profileManager;
 $('profileSelect').onchange = async () => {
   S.profile = $('profileSelect').value;
   localStorage.setItem('mxioc_profile', S.profile);
+  S.nodeSelection.clear();
   S.data = null;
   await reload();
   notice('已切换当前订阅配置');

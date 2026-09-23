@@ -1152,19 +1152,52 @@ def replace_references(doc, old, new=None):
     doc["rules"] = updated
 
 
+def delete_nodes_from_doc(doc, names):
+    if not isinstance(names, list):
+        raise ValueError("请选择需要删除的节点")
+    requested = []
+    for value in names:
+        name = str(value or "").strip()
+        if name and name not in requested:
+            requested.append(name)
+    if not requested:
+        raise ValueError("请至少选择一个节点")
+
+    nodes = doc.setdefault("proxies", [])
+    existing = {node.get("name") for node in nodes}
+    missing = [name for name in requested if name not in existing]
+    if missing:
+        raise ValueError("节点不存在：" + "、".join(missing))
+
+    selected = set(requested)
+    dependants = [
+        node.get("name") for node in nodes
+        if node.get("dialer-proxy") in selected and node.get("name") not in selected
+    ]
+    if dependants:
+        raise ValueError("选中的入口节点仍被以下链式代理使用，请同时勾选它们：" + "、".join(dependants))
+
+    deleted = [node.get("name") for node in nodes if node.get("name") in selected]
+    doc["proxies"] = [node for node in nodes if node.get("name") not in selected]
+    for name in deleted:
+        replace_references(doc, name)
+    return deleted
+
+
+def bulk_delete_nodes(payload):
+    doc = read_config()
+    deleted = delete_nodes_from_doc(doc, payload.get("names"))
+    write_config(doc, "node-bulk-delete")
+    return {"deleted": len(deleted), "names": deleted}
+
+
 def mutate_node(method, payload):
     doc = read_config()
     nodes = doc.setdefault("proxies", [])
     old_name = str(payload.get("oldName", ""))
     if method == "DELETE":
         name = str(payload.get("name", ""))
-        if not any(x.get("name") == name for x in nodes):
-            raise ValueError("节点不存在")
-        dependants = [x.get("name") for x in nodes if x.get("dialer-proxy") == name]
-        if dependants:
-            raise ValueError("该节点正被链式代理用作前置中转，请先删除或修改：" + "、".join(dependants))
-        doc["proxies"] = [x for x in nodes if x.get("name") != name]
-        replace_references(doc, name)
+        delete_nodes_from_doc(doc, [name])
     else:
         config = payload.get("config")
         if not isinstance(config, dict):
@@ -1561,6 +1594,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True})
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("DELETE", data)
+            elif path == "/admin/api/nodes/bulk":
+                return self.json_out({"ok": True, **bulk_delete_nodes(data)})
             elif path == "/admin/api/groups": mutate_group("DELETE", data)
             elif path == "/admin/api/rules": mutate_rule("DELETE", data)
             elif path == "/admin/api/dns": mutate_dns("DELETE", data)
