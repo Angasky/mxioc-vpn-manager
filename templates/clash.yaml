@@ -44,16 +44,12 @@ dns:
     - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    +.gemini.google.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    +.bard.google.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    +.gemini.google.com: &id001
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.bard.google.com: *id001
     +.douyin.com:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
@@ -106,40 +102,40 @@ dns:
     - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     +.youtube.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.youtu.be:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.googlevideo.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.ytimg.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.youtube-nocookie.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.youtubei.googleapis.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.yt.be:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
     +.x.com:
     - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
@@ -286,25 +282,25 @@ dns:
     - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
     +.google.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
     +.googleapis.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
     +.gstatic.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
     +.googleusercontent.com:
-    - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.quad9.net/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
-    - https://dns.adguard-dns.com/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
     +.lan:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
@@ -572,6 +568,167 @@ dns:
     '*.omtrdc.net':
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
+    +.ggpht.com:
+    - https://1.1.1.1/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.google/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.quad9.net/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    - https://dns.adguard-dns.com/dns-query#%E2%96%B6%EF%B8%8F%20YouTube
+    +.googleapis.cn:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googleapis-cn.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.android.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googleplay.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googlemail.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.gmail.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googledrive.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googlephotos.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googlemaps.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.firebaseapp.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.firebaseio.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.appspot.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.blogger.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.blogspot.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googlesource.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.chromium.org:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.chrome.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.chromebook.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.chromecast.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.withgoogle.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.recaptcha.net:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.g.co:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.g.dev:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.g.page:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.goog:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.google:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.1e100.net:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.gvt1.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.gvt2.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.gvt3.com:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.googlezip.net:
+    - https://1.1.1.1/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.google/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.quad9.net/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    - https://dns.adguard-dns.com/dns-query#%E8%B0%B7%E6%AD%8C%E6%9C%8D%E5%8A%A1
+    +.firebase.google.com: *id001
   nameserver:
   - https://1.1.1.1/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
   - https://dns.google/dns-query#%E2%9C%88%EF%B8%8F%20Proxy
@@ -587,6 +744,11 @@ proxy-groups:
   - ✈️ Proxy
   - DIRECT
 - name: ▶️ YouTube
+  type: select
+  proxies:
+  - ✈️ Proxy
+  - DIRECT
+- name: 谷歌服务
   type: select
   proxies:
   - ✈️ Proxy
@@ -756,8 +918,8 @@ rules:
 - DOMAIN-SUFFIX,openai.com,🤖 ChatGPT
 - DOMAIN-SUFFIX,chatgpt.com,🤖 ChatGPT
 - DOMAIN-SUFFIX,claude.ai,🤖 ChatGPT
-- DOMAIN-SUFFIX,gemini.google.com,✈️ Proxy
-- DOMAIN-SUFFIX,bard.google.com,🤖 ChatGPT
+- DOMAIN-SUFFIX,gemini.google.com,谷歌服务
+- DOMAIN-SUFFIX,bard.google.com,谷歌服务
 - DOMAIN-KEYWORD,openai,🤖 ChatGPT
 - DOMAIN-KEYWORD,anthropic,🤖 ChatGPT
 - DOMAIN-SUFFIX,douyin.com,DIRECT
@@ -782,6 +944,40 @@ rules:
 - DOMAIN-SUFFIX,youtube-nocookie.com,▶️ YouTube
 - DOMAIN-SUFFIX,youtubei.googleapis.com,▶️ YouTube
 - DOMAIN-SUFFIX,yt.be,▶️ YouTube
+- PROCESS-NAME,com.google.android.youtube,▶️ YouTube
+- PROCESS-NAME,com.google.android.apps.youtube.music,▶️ YouTube
+- PROCESS-NAME,com.google.android.apps.youtube.kids,▶️ YouTube
+- PROCESS-NAME,com.google.android.youtube.tv,▶️ YouTube
+- PROCESS-NAME,com.google.android.gms,谷歌服务
+- PROCESS-NAME,com.google.android.gsf,谷歌服务
+- PROCESS-NAME,com.google.android.gsf.login,谷歌服务
+- PROCESS-NAME,com.google.android.googlequicksearchbox,谷歌服务
+- PROCESS-NAME,com.google.android.gm,谷歌服务
+- PROCESS-NAME,com.google.android.apps.maps,谷歌服务
+- PROCESS-NAME,com.google.android.apps.photos,谷歌服务
+- PROCESS-NAME,com.google.android.apps.docs,谷歌服务
+- PROCESS-NAME,com.google.android.apps.nbu.files,谷歌服务
+- PROCESS-NAME,com.google.android.keep,谷歌服务
+- PROCESS-NAME,com.google.android.calendar,谷歌服务
+- PROCESS-NAME,com.google.android.contacts,谷歌服务
+- PROCESS-NAME,com.google.android.apps.translate,谷歌服务
+- PROCESS-NAME,com.google.android.apps.walletnfcrel,谷歌服务
+- PROCESS-NAME,com.google.android.apps.chromecast.app,谷歌服务
+- PROCESS-NAME,com.google.android.apps.tachyon,谷歌服务
+- PROCESS-NAME,com.google.android.apps.messaging,谷歌服务
+- PROCESS-NAME,com.google.android.apps.authenticator2,谷歌服务
+- PROCESS-NAME,com.android.vending,谷歌服务
+- PROCESS-NAME,GoogleDriveFS.exe,谷歌服务
+- PROCESS-NAME,BackupandSync,谷歌服务
+- RULE-SET,youtube-services,▶️ YouTube
+- RULE-SET,google-services-gemini,谷歌服务
+- RULE-SET,google-services-drive,谷歌服务
+- RULE-SET,google-services-earth,谷歌服务
+- RULE-SET,google-services-fcm,谷歌服务
+- RULE-SET,google-services-search,谷歌服务
+- RULE-SET,google-services-voice,谷歌服务
+- RULE-SET,google-services-main,谷歌服务
+- GEOSITE,google,谷歌服务
 - DOMAIN-SUFFIX,x.com,𝕏 X/推特
 - DOMAIN-SUFFIX,twitter.com,𝕏 X/推特
 - DOMAIN-SUFFIX,t.co,𝕏 X/推特
@@ -853,11 +1049,11 @@ rules:
 - DOMAIN-SUFFIX,sgpstatp.com,📹 TikTok
 - DOMAIN-SUFFIX,tik-tokapi.com,📹 TikTok
 - DOMAIN-KEYWORD,tiktok,📹 TikTok
-- DOMAIN-SUFFIX,google.com,✈️ Proxy
-- DOMAIN-SUFFIX,googleapis.com,✈️ Proxy
-- DOMAIN-SUFFIX,gstatic.com,✈️ Proxy
-- DOMAIN-SUFFIX,googleusercontent.com,✈️ Proxy
-- DOMAIN-KEYWORD,google,✈️ Proxy
+- DOMAIN-SUFFIX,google.com,谷歌服务
+- DOMAIN-SUFFIX,googleapis.com,谷歌服务
+- DOMAIN-SUFFIX,gstatic.com,谷歌服务
+- DOMAIN-SUFFIX,googleusercontent.com,谷歌服务
+- DOMAIN-KEYWORD,google,谷歌服务
 - IP-CIDR,0.0.0.0/8,DIRECT,no-resolve
 - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
 - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
@@ -1057,5 +1253,61 @@ rule-providers:
     format: yaml
     url: https://vpn.mxvv.cn/rules/clash/advertising-lite-strong.yaml
     path: ./ruleset/advertising-lite-strong.yaml
+    interval: 86400
+  youtube-services:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/YouTube/YouTube_No_Resolve.yaml
+    path: ./ruleset/youtube-services.yaml
+    interval: 86400
+  google-services-main:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Google/Google_No_Resolve.yaml
+    path: ./ruleset/google-services-main.yaml
+    interval: 86400
+  google-services-drive:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GoogleDrive/GoogleDrive_No_Resolve.yaml
+    path: ./ruleset/google-services-drive.yaml
+    interval: 86400
+  google-services-earth:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GoogleEarth/GoogleEarth_No_Resolve.yaml
+    path: ./ruleset/google-services-earth.yaml
+    interval: 86400
+  google-services-fcm:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GoogleFCM/GoogleFCM_No_Resolve.yaml
+    path: ./ruleset/google-services-fcm.yaml
+    interval: 86400
+  google-services-search:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GoogleSearch/GoogleSearch_No_Resolve.yaml
+    path: ./ruleset/google-services-search.yaml
+    interval: 86400
+  google-services-voice:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/GoogleVoice/GoogleVoice_No_Resolve.yaml
+    path: ./ruleset/google-services-voice.yaml
+    interval: 86400
+  google-services-gemini:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Gemini/Gemini_No_Resolve.yaml
+    path: ./ruleset/google-services-gemini.yaml
     interval: 86400
 find-process-mode: strict

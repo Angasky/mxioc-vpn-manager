@@ -20,15 +20,15 @@ def test_bundled_template_is_complete_and_has_no_nodes():
     server.validate_config(doc)
 
     assert doc["proxies"] == []
-    assert len(doc["proxy-groups"]) == 20
+    assert len(doc["proxy-groups"]) == 21
     assert len(doc["rules"]) >= 200
-    assert len(doc["rule-providers"]) == 17
+    assert len(doc["rule-providers"]) == 25
     assert doc["dns"]["nameserver-policy"]
 
     group_names = {group["name"] for group in doc["proxy-groups"]}
     required = {
         "✈️ Proxy", "🤖 ChatGPT", "▶️ YouTube", "𝕏 X/推特", "💬 WhatsApp",
-        "📘 Facebook", "✈️ Telegram", "🎬 Netflix", "📹 TikTok",
+        "📘 Facebook", "✈️ Telegram", "🎬 Netflix", "📹 TikTok", "谷歌服务",
         "🛍️ TIKTOK SHOP", "☁️ 甲骨文 Oracle", "🛡️ 基础广告拦截", "🔥 强力广告拦截",
     }
     assert required <= group_names

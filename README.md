@@ -15,6 +15,7 @@
 - 面向新版 v2rayN 和 Shadowrocket 的 Base64 转换订阅链接
 - 转换前兼容性报告；无法表达两跳关系的链式节点会明确跳过
 - 策略组、路由规则与 DNS 分流的可视化管理
+- 独立的“谷歌服务”策略组，覆盖 Google 网页、Android/Play、FCM、Firebase、Drive、Earth、Search、Voice、Gemini 等业务，并保持 YouTube 单独分流
 - 修改前自动备份配置文件
 - 登录认证、会话过期和密码修改
 - 每 24 小时检查一次 GitHub 仓库更新，在后台提示后由管理员选择安装或忽略当前版本
