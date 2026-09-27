@@ -7,6 +7,7 @@ CONFIG_DIR="/etc/sing-box/subscribe"
 CONFIG_FILE="${CONFIG_DIR}/clash-cn-route"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 NGINX_CONF="/etc/nginx/conf.d/${APP_NAME}.conf"
+SHORTCUT_FILE="/usr/local/bin/vpn"
 RAW_BASE="${MXIOC_RAW_BASE:-https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main}"
 MODE=""
 DOMAIN=""
@@ -344,6 +345,31 @@ stage_file() {
     [[ -s "${destination}" ]] || fatal "下载失败：${relative}"
 }
 
+install_shortcut() {
+    cat >"${SHORTCUT_FILE}" <<'VPN'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+installer="$(mktemp /tmp/mxioc-vpn-menu.XXXXXX)"
+cleanup() {
+    [[ ! -f "${installer}" ]] || rm -f -- "${installer}"
+}
+trap cleanup EXIT
+
+curl -fsSL --retry 3 --connect-timeout 10 \
+    https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh \
+    -o "${installer}"
+chmod 0700 "${installer}"
+
+if [[ "${EUID}" -eq 0 ]]; then
+    /bin/bash "${installer}" "$@"
+else
+    sudo /bin/bash "${installer}" "$@"
+fi
+VPN
+    chmod 0755 "${SHORTCUT_FILE}"
+}
+
 install_application() {
     STAGE_DIR="$(mktemp -d /tmp/mxioc-install.XXXXXX)"
     SOURCE_ROOT="$(local_source_root)"
@@ -370,7 +396,9 @@ install_application() {
     "${APP_DIR}/venv/bin/python" -m pip install --disable-pip-version-check --upgrade pip
     "${APP_DIR}/venv/bin/python" -m pip install --disable-pip-version-check -r "${APP_DIR}/requirements.txt"
     install -m 0644 "${STAGE_DIR}/mxioc-rule-manager.service" "${SERVICE_FILE}"
+    install_shortcut
     success "程序文件与 Python 环境安装完成"
+    success "快捷命令已安装：输入 vpn 即可打开管理菜单"
 }
 
 write_release_version() {
@@ -494,6 +522,7 @@ uninstall_application() {
     if [[ "${PURGE_DATA}" == "1" ]]; then
         rm -f -- /etc/sing-box/subscribe/clash-cn-route /etc/sing-box/subscribe/clash-cn-route.yml
     fi
+    rm -f -- "${SHORTCUT_FILE}"
     rm -rf -- "${APP_DIR}"
     if [[ "${PURGE_DATA}" == "1" ]]; then
         success "MXIOC 管理后台及主订阅数据已彻底卸载"

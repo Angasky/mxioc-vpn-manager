@@ -252,6 +252,7 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 rm -f /etc/nginx/conf.d/mxioc-rule-manager.conf
 nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
 rm -f /etc/mxioc-rule-manager.auth.json /etc/mxioc-rule-manager.auth
+rm -f /usr/local/bin/vpn
 rm -rf /opt/mxioc-rule-manager
 rm -f -- "$0"
 """

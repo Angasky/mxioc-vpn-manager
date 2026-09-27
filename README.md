@@ -1,118 +1,184 @@
-# Mxioc VPN 配置管理后台
+# 🚀 MXIOC VPN Manager
 
-用于管理 Mihomo/Clash YAML 订阅配置的轻量级网页后台。项目由 Python 后端和单页前端组成，不依赖数据库。
+一个面向 Mihomo / Clash 的可视化订阅管理后台。无需数据库，通过网页即可管理节点、链式代理、策略组、路由规则、DNS 分流和多份订阅配置。
 
-## 功能
+## ⚡ 一键安装
 
-- 多订阅配置的新建、复制、重命名和删除
-- 内置完整的无节点 Clash 模板；新建空订阅时保留策略组、DNS 分流、广告与业务规则框架
-- VLESS、TUIC、Hysteria2、SOCKS5、HTTP、HTTPS 等节点的表单管理和链接导入
-- IPv4、标准 IPv6 及省略方括号的 IPv6 分享链接导入
-- 节点拖拽排序、上移/下移、复选框全选与安全批量删除，并同步策略组显示顺序
-- 根据节点服务器公网 IP 批量识别国家并规范化名称开头的国旗，重复执行不会叠加国旗
-- 入口中转节点与出口落地节点的可视化链式代理配置
-- Clash YAML/Base64 订阅链接的批量导入、重名处理与策略组多选
-- 面向新版 v2rayN 和 Shadowrocket 的 Base64 转换订阅链接
-- 转换前兼容性报告；无法表达两跳关系的链式节点会明确跳过
-- 策略组、路由规则与 DNS 分流的可视化管理
-- 独立的“谷歌服务”策略组，覆盖 Google 网页、Android/Play、FCM、Firebase、Drive、Earth、Search、Voice、Gemini 等业务，并保持 YouTube 单独分流
-- 修改前自动备份配置文件
-- 登录认证、30 天持久会话，以及管理员用户名和密码的独立修改；同时兼容 IP/HTTP 与域名/HTTPS 部署
-- 每 24 小时检查一次 GitHub 仓库更新，可在后台升级或重新安装当前版本
-- 后台安全卸载菜单，支持先归档用户数据或彻底清除主订阅，并要求密码、确认短语和二次确认
-- 广告规则库的定时更新工具
-- 订阅下载文件名与流量统计响应头
-
-## 安全说明
-
-仓库只包含程序源码和部署模板，不包含生产环境的订阅文件、节点链接、认证文件、备份、TLS 私钥或服务器密码。请勿把这些运行数据提交到 Git。
-
-## 环境要求
-
-- Linux 服务器
-- Python 3.9+
-- PyYAML
-- Nginx（用于 HTTPS 和反向代理）
-- systemd（推荐）
-
-## 一键部署（推荐）
-
-以 root 身份运行以下命令：
+在 Linux 服务器中执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash
 ```
 
-安装器会显示 MXIOC 字符菜单，并提供以下操作：
-
-- IP 部署：自动检测服务器公网 IP，通过 HTTP 地址访问。
-- 域名 HTTPS 部署：检查域名全部 A/AAAA 记录是否指向当前服务器，通过后自动申请 Let's Encrypt 证书、绑定 Nginx 并启用续期。
-- 升级/修复：只更新后台程序与内置模板，保留现有配置。
-- 重置管理员凭证：直接在终端重新设置后台用户名和密码，并注销全部旧会话。
-- 卸载并保留数据：先归档用户配置至 `/var/backups`，再移除后台。
-- 彻底卸载：删除后台、后台数据和主 Clash 订阅；其他 sing-box 文件及 TLS 证书不会被删除。
-
-也可以跳过菜单直接指定模式：
+安装完成后，服务器会自动创建快捷命令：
 
 ```bash
-# IP 模式
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --ip
-
-# 域名 HTTPS 模式
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --domain vpn.example.com --email admin@example.com
-
-# 升级或修复
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --update-only
-
-# 重置管理员用户名与密码
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --reset-auth
-
-# 卸载前归档保留用户数据
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --uninstall
-
-# 彻底卸载后台及主订阅
-curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --purge
+vpn
 ```
 
-重复执行安装器会更新程序和内置模板，但会保留现有节点、规则、订阅配置、管理员账号及历史备份。只有首次安装或在后台新建“空白模板”订阅时，才会使用 `templates/clash.yaml`。
+以后输入 `vpn` 就能重新打开管理菜单，不需要再次复制安装命令。普通用户执行时会自动调用 `sudo`。
 
-后台的软件更新功能同样只替换程序文件、服务模板和内置 Clash 模板，不会覆盖运行中的订阅配置。节点国旗识别会把节点服务器 IP 发送给无需密钥的 `api.country.is`，仅获取 ISO 两位国家代码，并在内存中缓存识别结果七天。
+```text
+1) 🌐 IP 部署模式
+2) 🔒 域名 HTTPS 模式
+3) ⬆️ 升级 / 修复
+4) 🔑 重置管理员凭证
+5) 📦 卸载并保留数据
+6) 🗑️ 彻底卸载
+0) 👋 退出
+```
 
-## 手动安装
+> 推荐选择域名 HTTPS 模式。脚本会检查域名的 A/AAAA 记录，确认已经指向当前服务器后，自动申请并续期 Let's Encrypt 证书。
+
+## ✨ 主要功能
+
+### 🧩 节点与订阅
+
+- VLESS、TUIC、Hysteria2、Trojan、Shadowsocks、VMess、SOCKS5、HTTP 和 HTTPS 节点管理
+- 节点分享链接一键导入，兼容 IPv4 与 IPv6
+- Clash YAML / Base64 订阅批量导入
+- 节点拖动排序、上移、下移、全选和批量删除
+- 根据节点公网 IP 自动添加国家旗帜，重复执行不会叠加
+- 多订阅的新建、复制、重命名、切换和删除
+- 转换为 v2rayN 与 Shadowrocket 可用的 Base64 订阅
+- 转换前显示协议兼容性，无法转换的节点会明确提示
+
+### 🔗 链式代理
+
+- 可视化选择入口节点和出口节点
+- 自定义链式代理名称
+- 选择加入一个、多个或全部策略组
+- 删除普通节点时自动清理策略组中的失效引用
+
+### 🧭 规则与 DNS
+
+- 策略组、路由规则和 DNS 分流的可视化增删改查
+- 中国业务直连，境外业务使用加密海外 DNS
+- Google、YouTube、TikTok、Facebook、Telegram、Netflix、WhatsApp、X 等独立业务分组
+- Google 网页、Android、Play、FCM、Firebase、Drive、Gemini 等业务完整分流
+- YouTube 保持独立策略，不与其他 Google 服务混用
+- 基础广告拦截与强力广告拦截
+- 内置完整无私人节点的 Clash 起始模板
+
+### 🛡️ 系统管理
+
+- 兼容 IP/HTTP 与域名/HTTPS 登录
+- 登录状态持久保存 30 天
+- 网页和 Linux 菜单均可修改管理员用户名与密码
+- 每天自动检查 GitHub 更新
+- 网页和 `vpn` 菜单均可升级或修复程序
+- 修改配置前自动创建快照备份
+- 支持保留数据卸载与彻底卸载
+
+## 🖥️ 快捷命令
+
+安装后直接运行：
 
 ```bash
-sudo install -d -m 0755 /opt/mxioc-rule-manager/templates
-sudo install -m 0644 server.py index.html /opt/mxioc-rule-manager/
-sudo install -m 0644 templates/clash.yaml /opt/mxioc-rule-manager/templates/
-sudo python3 -m venv /opt/mxioc-rule-manager/venv
-sudo /opt/mxioc-rule-manager/venv/bin/python -m pip install -r requirements.txt
-sudo install -m 0644 deploy/mxioc-rule-manager.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now mxioc-rule-manager
+vpn
 ```
 
-首次启动时，程序会生成管理员账号 `admin` 和随机密码。初始密码保存在：
+也可以跳过菜单，直接指定操作：
+
+```bash
+# 🌐 IP 模式
+vpn --ip
+
+# 🔒 域名 HTTPS 模式
+vpn --domain vpn.example.com --email admin@example.com
+
+# ⬆️ 升级或修复
+vpn --update-only
+
+# 🔑 重置管理员用户名和密码
+vpn --reset-auth
+
+# 📦 卸载后台并归档用户数据
+vpn --uninstall
+
+# 🗑️ 彻底卸载后台和主订阅
+vpn --purge
+```
+
+快捷命令每次运行都会获取仓库中的最新管理脚本，因此菜单功能会保持最新。
+
+## 🔐 首次登录
+
+首次安装会生成管理员账号 `admin` 和随机密码：
 
 ```text
 /opt/mxioc-rule-manager/initial-password.txt
 ```
 
-登录并修改密码后，应删除这个初始密码文件。
+登录后可以在“账号与安全”中修改用户名和密码，也可以运行：
 
-## 配置文件位置
-
-主配置默认从以下路径读取，优先使用第一个存在的文件：
-
-```text
-/etc/sing-box/subscribe/clash-cn-route
-/etc/sing-box/subscribe/clash-cn-route.yml
+```bash
+vpn --reset-auth
 ```
 
-管理后台监听 `127.0.0.1:62577`。生产环境应通过 Nginx 提供 HTTPS，不要把该端口直接开放到公网。参考配置见 `deploy/nginx.conf.example`。
+修改凭证后，所有旧登录会话都会自动失效。
 
-## 广告规则自动更新
+## 📦 升级与卸载
 
-可选安装：
+### 升级
+
+```bash
+vpn --update-only
+```
+
+升级只替换后台程序、服务文件和内置模板，不会覆盖正在使用的节点、规则、订阅、管理员凭证、历史备份和 TLS 证书。
+
+### 保留数据卸载
+
+```bash
+vpn --uninstall
+```
+
+用户数据会先归档至：
+
+```text
+/var/backups/mxioc-rule-manager-日期时间/user-data.tar.gz
+```
+
+归档失败时会自动取消卸载。
+
+### 彻底卸载
+
+```bash
+vpn --purge
+```
+
+彻底卸载会删除管理后台、后台运行数据和主 Clash 订阅，但不会删除其他 sing-box 文件或服务器上的 TLS 证书。
+
+## 📁 重要路径
+
+```text
+程序目录        /opt/mxioc-rule-manager
+快捷命令        /usr/local/bin/vpn
+认证文件        /etc/mxioc-rule-manager.auth.json
+主订阅          /etc/sing-box/subscribe/clash-cn-route
+主订阅备用路径  /etc/sing-box/subscribe/clash-cn-route.yml
+Nginx 配置       /etc/nginx/conf.d/mxioc-rule-manager.conf
+systemd 服务    /etc/systemd/system/mxioc-rule-manager.service
+数据归档        /var/backups/mxioc-rule-manager-日期时间
+```
+
+后台程序只监听 `127.0.0.1:62577`，公网访问由 Nginx 反向代理提供。
+
+## 🧰 环境要求
+
+- Debian / Ubuntu
+- RHEL / CentOS / Rocky Linux / AlmaLinux
+- Python 3.9+
+- systemd
+- Nginx
+- 可访问 GitHub 与系统软件源
+
+安装脚本会自动准备 Python、PyYAML、Nginx、Curl、DNS 工具和证书组件。
+
+## 🚫 广告规则自动更新
+
+需要定时更新本地广告规则时可以启用：
 
 ```bash
 sudo install -m 0755 work/update-ad-rules.py /usr/local/libexec/update-mxioc-ad-rules.py
@@ -121,12 +187,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now mxioc-ad-rules.timer
 ```
 
-## 更新部署
+## 🔒 数据安全
 
-拉取新版本后，将 `server.py` 与 `index.html` 覆盖到 `/opt/mxioc-rule-manager/`，然后重启服务：
+仓库只保存程序源码和无私人节点的模板，不包含生产环境中的节点链接、服务器密码、管理员密码、订阅文件、历史备份或 TLS 私钥。
+
+节点国旗识别会把节点服务器 IP 发送给 `api.country.is`，仅用于获取 ISO 国家代码，查询结果会在内存中缓存七天。
+
+## 🧪 开发检查
 
 ```bash
-sudo systemctl restart mxioc-rule-manager
+python -m pytest -q
+bash -n install.sh
 ```
 
-GitHub 用于托管源码和版本记录；正在运行的管理后台仍部署在自己的服务器上。
+项目当前由 Python 后端、单页网页前端、Nginx 和 systemd 组成，不依赖数据库。
