@@ -828,6 +828,34 @@ code {
   word-break: break-all;
   white-space: normal;
 }
+.subscription-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 112px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  margin-bottom: 10px;
+  background: #090e1a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.subscription-row:hover { border-color: rgba(56, 189, 248, 0.3); }
+.subscription-row code {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.subscription-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.subscription-qr-button {
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+  line-height: 0;
+}
+.subscription-qr { width: 100px; height: 100px; display: block; }
 
 /* ==================== RESPONSIVE ==================== */
 @media (max-width: 960px) {
@@ -864,6 +892,9 @@ code {
   .grid { grid-template-columns: 1fr; }
   .span2 { grid-column: auto; }
   .checks { grid-template-columns: 1fr; }
+  .subscription-row { grid-template-columns: 1fr; }
+  .subscription-actions { justify-content: flex-start; }
+  .subscription-qr-button { width: 112px; }
 }
 </style>
 </head>
@@ -1176,7 +1207,40 @@ function cards() {
   </div>`;
 }
 
-function overview() {
+function subscriptionRow(name, description, url, href, details = '') {
+  let encodedUrl = encodeURIComponent(url).replace(/'/g, '%27');
+  let encodedName = encodeURIComponent(name).replace(/'/g, '%27');
+  let qr = '/admin/api/qrcode?url=' + encodedUrl;
+  return `
+    <div class="subscription-row">
+      <div style="min-width:0">
+        <b>${esc(name)}</b>
+        <div class="muted">${esc(description)}</div>
+        <code>${esc(url)}</code>
+        ${details}
+      </div>
+      <div class="subscription-actions">
+        <button class="btn small" onclick="copyText(decodeURIComponent('${encodedUrl}'))">[ 复制 ]</button>
+        <a class="btn small primary" href="${esc(href)}">[ 下载 ]</a>
+      </div>
+      <button class="subscription-qr-button" onclick="openSubscriptionQr('${encodedUrl}','${encodedName}')" title="点击放大二维码">
+        <img class="subscription-qr" src="${esc(qr)}" alt="${esc(name)}订阅二维码">
+      </button>
+    </div>`;
+}
+
+function openSubscriptionQr(encodedUrl, encodedName) {
+  let url = decodeURIComponent(encodedUrl), name = decodeURIComponent(encodedName);
+  let qr = '/admin/api/qrcode?url=' + encodeURIComponent(url);
+  openModal('QR_IMPORT // ' + name, `
+    <div style="text-align:center">
+      <img src="${esc(qr)}" alt="${esc(name)}订阅二维码" style="width:min(320px,100%);background:#fff;padding:12px;border-radius:10px;">
+      <div class="note" style="text-align:left;overflow-wrap:anywhere;">${esc(url)}</div>
+      <button class="btn primary" onclick="copyText(decodeURIComponent('${encodeURIComponent(url)}'))">[ 复制订阅链接 ]</button>
+    </div>`);
+}
+
+async function overview() {
   let p = S.profiles.find(x => x.id === S.profile) || S.data.profile;
   let url = location.origin + p.url;
   $('content').innerHTML = cards() + `
@@ -1193,7 +1257,34 @@ function overview() {
     </div>
     <div class="note">当前配置的所有节点、策略组、路由规则及 DNS 分流设置均隔离保存于本订阅中。每次更新都会经过结构校验并自动生成历史快照备份。</div>
     <button class="btn" onclick="go('raw')">[ 查看/编辑完整 YAML 源代码 ]</button>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h3>SUBSCRIPTION_LINKS // 客户端订阅与扫码导入</h3>
+    </div>
+    <div class="note">二维码内容就是旁边显示的订阅地址，可直接使用客户端扫码导入。Clash 保留完整规则和 DNS；V2Ray 与小火箭链接只包含兼容节点。</div>
+    ${subscriptionRow('Clash / Mihomo 完整订阅', '保留节点、策略组、路由规则、DNS 与链式代理', url, p.url)}
+    <div id="overviewConversionRows"><div class="empty">正在生成 V2Ray 与小火箭订阅...</div></div>
   </section>`;
+
+  try {
+    let d = await api('/conversions');
+    if (S.page !== 'overview' || !$('overviewConversionRows')) return;
+    $('overviewConversionRows').innerHTML = d.formats.map(f => {
+      let convertedUrl = location.origin + f.url;
+      let skipped = f.skipped || [];
+      let details = `<div class="hint">${esc(f.note)} · 可转换 ${f.supported} 个节点，跳过 ${skipped.length} 个</div>`;
+      if (skipped.length) details += `
+        <details style="margin-top:8px;">
+          <summary style="color:var(--danger);cursor:pointer;font-family:var(--font-mono);font-size:12px;">查看不兼容节点 (${skipped.length})</summary>
+          <div class="note">${skipped.map(x => `${esc(x.name)} (${esc(x.type)}): ${esc(x.reason)}`).join('<br>')}</div>
+        </details>`;
+      return subscriptionRow(f.name, `节点转换订阅 · ${f.supported} 个兼容节点`, convertedUrl, f.url, details);
+    }).join('');
+  } catch (error) {
+    if ($('overviewConversionRows')) $('overviewConversionRows').innerHTML = `<div class="error">${esc(error.message)}</div>`;
+  }
 }
 
 function nodes() {
@@ -1575,7 +1666,6 @@ function dns() {
 
 async function subscriptions() {
   let p = S.profiles.find(x => x.id === S.profile) || S.data.profile;
-  let clashUrl = location.origin + p.url;
   $('content').innerHTML = `
   <section class="panel">
     <div class="panel-head">
@@ -1608,59 +1698,10 @@ async function subscriptions() {
       <div id="formError" class="error"></div>
       <button id="confirmSubImport" class="btn primary" disabled>[ 确认批量导入节点 ]</button>
     </form>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h3>CONVERSION // 多客户端订阅转换链接</h3>
-    </div>
-    <div class="note">Clash 原生订阅保留完整节点拓扑、分流规则、DNS 与链式中继；转换后的通用链接仅输出节点列表供兼容客户端订阅。</div>
-    <div class="backup">
-      <div>
-        <b>Clash / Mihomo 完整订阅 (Native YAML)</b>
-        <div class="muted">支持完整规则引擎、DNS 分流与链式中转</div>
-        <code>${esc(clashUrl)}</code>
-      </div>
-      <div class="toolbar">
-        <button class="btn small" onclick="copyText('${esc(clashUrl)}')">[ 复制 ]</button>
-        <a class="btn small primary" href="${esc(p.url)}">[ 下载 ]</a>
-      </div>
-    </div>
-    <div id="conversionRows">
-      <div class="empty">正在计算客户端兼容性报告...</div>
-    </div>
   </section>`;
 
   $('previewSub').onclick = previewSubscription;
   $('subImportForm').onsubmit = confirmSubscriptionImport;
-
-  try {
-    let d = await api('/conversions');
-    $('conversionRows').innerHTML = d.formats.map(f => {
-      let url = location.origin + f.url;
-      let skipped = f.skipped || [];
-      return `
-      <div class="backup">
-        <div style="min-width:0">
-          <b>${esc(f.name)}</b>
-          <div class="muted">可转换 ${f.supported} 个节点；跳过 ${skipped.length} 个无法表示的两跳节点</div>
-          <div class="hint">${esc(f.note)}</div>
-          <code>${esc(url)}</code>
-          ${skipped.length ? `
-            <details style="margin-top:8px;">
-              <summary style="color:var(--danger);cursor:pointer;font-family:var(--font-mono);font-size:12px;">查看被跳过的两跳/不兼容节点 (${skipped.length})</summary>
-              <div class="note" style="margin-top:6px;">${skipped.map(x => `${esc(x.name)} (${esc(x.type)}): ${esc(x.reason)}`).join('<br>')}</div>
-            </details>` : ''}
-        </div>
-        <div class="toolbar">
-          <button class="btn small" onclick="copyText('${esc(url)}')">[ 复制 ]</button>
-          <a class="btn small primary" href="${esc(f.url)}">[ 下载 ]</a>
-        </div>
-      </div>`;
-    }).join('');
-  } catch (e) {
-    $('conversionRows').innerHTML = `<div class="error">${esc(e.message)}</div>`;
-  }
 }
 
 async function previewSubscription() {

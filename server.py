@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import base64
+import io
 import json
 import os
 import copy
@@ -23,6 +24,8 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
+import qrcode
+from qrcode.image.svg import SvgPathImage
 try:
     from yaml import CSafeLoader as YamlLoader, CSafeDumper as YamlDumper
 except ImportError:
@@ -1355,6 +1358,20 @@ def converted_subscription(profile_id, format_id):
     return base64.b64encode(raw), skipped
 
 
+def subscription_qr_svg(url):
+    url = str(url or "").strip()
+    if not url or len(url) > 4096:
+        raise ValueError("订阅链接为空或过长")
+    code = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                         box_size=8, border=3)
+    code.add_data(url)
+    code.make(fit=True)
+    image = code.make_image(image_factory=SvgPathImage)
+    output = io.BytesIO()
+    image.save(output)
+    return output.getvalue()
+
+
 def snapshot():
     doc = read_config(copy_doc=False)
     files = current_files()
@@ -1764,6 +1781,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def svg_out(self, body):
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+        self.send_header("Cache-Control", "private, max-age=300")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def body(self):
         length = int(self.headers.get("Content-Length", "0"))
         if length > MAX_BODY:
@@ -1835,6 +1861,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/admin", "/admin/"):
             return self.page()
+        if path == "/clash":
+            return self.subscription("clash")
         if path.startswith("/sub/"):
             return self.subscription(unquote(path[5:]))
         if path.startswith("/convert/"):
@@ -1853,6 +1881,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/admin/api/updates":
                 self.json_out(update_status())
+                return
+            if path == "/admin/api/qrcode":
+                query = parse_qs(urlparse(self.path).query)
+                self.svg_out(subscription_qr_svg((query.get("url") or [""])[0]))
                 return
             self.select_profile()
             if path == "/admin/api/snapshot":

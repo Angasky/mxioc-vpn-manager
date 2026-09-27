@@ -37,6 +37,8 @@ vpn
 - VLESS、TUIC、Hysteria2、Trojan、Shadowsocks、VMess、SOCKS5、HTTP 和 HTTPS 节点管理
 - 节点分享链接一键导入，兼容 IPv4 与 IPv6
 - Clash YAML / Base64 订阅批量导入
+- 总览集中展示 Clash、V2Ray/v2rayN 与 Shadowrocket 订阅，并为每个链接生成本地二维码
+- 公开订阅地址无需后台登录 Cookie，可直接粘贴或扫码导入客户端
 - 节点拖动排序、上移、下移、全选和批量删除
 - 根据节点公网 IP 自动添加国家旗帜，重复执行不会叠加
 - 多订阅的新建、复制、重命名、切换和删除
