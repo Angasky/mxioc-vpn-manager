@@ -2541,7 +2541,7 @@ function profileManager() {
     <div class="backup">
       <div>
         <b>${esc(p.name)}</b>
-        <div class="muted">ENDPOINT_ID: <code>${esc(p.id)}</code></div>
+        <div class="muted">LINK_SLUG: <code>${esc(p.slug)}</code> · ${p.customSlug ? '<span style="color:var(--danger)">高风险自定义</span>' : '<span style="color:var(--green)">随机安全路径</span>'}</div>
         <code>${esc(url)}</code>
       </div>
       <div class="toolbar">
@@ -2562,9 +2562,17 @@ function profileManager() {
           <input id="profileName" required placeholder="例如 专用工作订阅">
         </div>
         <div>
-          <label>链接标识 (Slug ID)</label>
-          <input id="profileId" required pattern="[a-z0-9][a-z0-9_-]{1,39}" placeholder="例如 work_sub">
-          <div class="hint">// 仅允许小写字母、数字、中划线和下划线。</div>
+          <label>订阅链接安全模式</label>
+          <label class="inlinecheck">
+            <input id="profileCustomSlug" type="checkbox" onchange="toggleProfileSlugFields('profile')">
+            <span>开启高风险模式并自定义链接标识</span>
+          </label>
+          <div class="hint">// 默认由系统生成 12 位随机字符，避免 /clash 等固定地址被扫描。</div>
+        </div>
+        <div id="profileSlugFields" class="span2 hidden">
+          <label>自定义链接标识 (Slug ID)</label>
+          <input id="profileSlug" maxlength="80" placeholder="例如 *** 或 private-link">
+          <div class="hint">// 高风险：自定义地址更容易被猜测。可以输入带或不带开头斜杠的标识。</div>
         </div>
         <div class="span2">
           <label>配置模板来源</label>
@@ -2588,7 +2596,8 @@ function profileManager() {
     try {
       let d = await api('/profiles', jsonOpt('POST', {
         name: val('profileName'),
-        id: val('profileId'),
+        customSlug: on('profileCustomSlug'),
+        slug: val('profileSlug'),
         templateId: val('profileTemplate')
       }));
       S.profile = d.profile.id;
@@ -2604,6 +2613,12 @@ function profileManager() {
   };
 }
 
+function toggleProfileSlugFields(prefix) {
+  let enabled = on(prefix + 'CustomSlug');
+  $(prefix + 'SlugFields').classList.toggle('hidden', !enabled);
+  $(prefix + 'Slug').required = enabled;
+}
+
 function profileEdit(encoded) {
   let id = decodeURIComponent(encoded);
   let p = S.profiles.find(x => x.id === id);
@@ -2612,20 +2627,30 @@ function profileEdit(encoded) {
   <form id="editProfile">
     <label>订阅显示名称</label>
     <input id="editProfileName" required value="${esc(p.name)}">
-    <label>链接标识 (Slug ID)</label>
-    <input id="editProfileId" required value="${esc(p.id)}" ${p.protected ? 'disabled' : ''}>
-    <div class="hint">// 修改链接标识将导致原客户端地址失效；主订阅 clash 为受保护固定端点。</div>
+    <label class="inlinecheck" style="margin-top:14px;">
+      <input id="editProfileCustomSlug" type="checkbox" ${p.customSlug ? 'checked' : ''} onchange="toggleProfileSlugFields('editProfile')">
+      <span>开启高风险模式并自定义链接标识</span>
+    </label>
+    <div class="hint">// 关闭高风险模式后，系统会使用 12 位随机字符替换当前地址，旧链接立即失效。</div>
+    <div id="editProfileSlugFields" class="${p.customSlug ? '' : 'hidden'}">
+      <label>自定义链接标识 (Slug ID)</label>
+      <input id="editProfileSlug" maxlength="80" value="${esc(p.slug)}" ${p.customSlug ? 'required' : ''}>
+      <div class="hint">// 高风险模式允许使用 *** 等 URL 安全字符，请勿使用容易被猜到的名称。</div>
+    </div>
     <div id="formError" class="error"></div>
     <button class="btn primary" style="margin-top:16px;">[ 💾 保存修改 ]</button>
   </form>`);
 
   $('editProfile').onsubmit = async e => {
     e.preventDefault();
+    if (p.customSlug && !on('editProfileCustomSlug') &&
+        !confirm('关闭高风险模式后将生成新的 12 位随机地址，当前订阅链接会立即失效。确认继续？')) return;
     try {
       let d = await api('/profiles', jsonOpt('PUT', {
         oldId: p.id,
-        id: p.protected ? p.id : val('editProfileId'),
-        name: val('editProfileName')
+        name: val('editProfileName'),
+        customSlug: on('editProfileCustomSlug'),
+        slug: val('editProfileSlug')
       }));
       if (S.profile === p.id) S.profile = d.profile.id;
       localStorage.setItem('mxioc_profile', S.profile);

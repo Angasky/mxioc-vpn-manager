@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import server
@@ -15,7 +16,7 @@ class PublicSubscriptionTests(unittest.TestCase):
             name: getattr(server, name)
             for name in (
                 "ROOT", "PROFILES_FILE", "PROFILES_DIR", "PROFILES_CACHE",
-                "PROFILES_MTIME", "CONFIG_CACHE",
+                "PROFILES_MTIME", "CONFIG_CACHE", "FILES",
             )
         }
         root = Path(self.temp.name)
@@ -27,6 +28,7 @@ class PublicSubscriptionTests(unittest.TestCase):
         server.PROFILES_CACHE = None
         server.PROFILES_MTIME = 0
         server.CONFIG_CACHE = {}
+        server.FILES = [config]
         server.PROFILES_FILE.write_text(json.dumps({"profiles": [{
             "id": "clash", "name": "Mxioc VPN", "protected": True,
             "files": [str(config)],
@@ -55,6 +57,18 @@ class PublicSubscriptionTests(unittest.TestCase):
         svg = server.subscription_qr_svg("http://192.0.2.1/clash")
         self.assertIn(b"<svg", svg)
         self.assertGreater(len(svg), 500)
+
+    def test_new_install_random_slug_is_public_and_clash_alias_is_absent(self):
+        server.PROFILES_FILE.unlink()
+        server.PROFILES_CACHE = None
+        server.PROFILES_MTIME = 0
+        profile = server.public_profile(server.load_profiles()["profiles"][0])
+        port = self.httpd.server_address[1]
+        with urlopen(f"http://127.0.0.1:{port}{profile['url']}", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+        with self.assertRaises(HTTPError) as error:
+            urlopen(f"http://127.0.0.1:{port}/clash", timeout=3)
+        self.assertEqual(error.exception.code, 404)
 
 
 if __name__ == "__main__":

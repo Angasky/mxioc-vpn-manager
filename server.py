@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import socket
+import string
 import subprocess
 import tempfile
 import threading
@@ -292,6 +293,7 @@ def load_profiles():
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     if not PROFILES_FILE.exists():
         data = {"profiles": [{"id": "clash", "name": "Mxioc VPN", "protected": True,
+                              "slug": random_slug(), "customSlug": False,
                               "files": [str(path) for path in FILES]}]}
         save_profiles(data)
         return data
@@ -325,6 +327,41 @@ def profile_record(profile_id=None):
     record = next((x for x in load_profiles()["profiles"] if x.get("id") == profile_id), None)
     if not record:
         raise ValueError("所选订阅配置不存在")
+    return record
+
+
+def random_slug(length=12):
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def record_slug(record):
+    return str(record.get("slug") or record.get("id") or "")
+
+
+def unique_slug(data, length=12):
+    existing = {record_slug(record) for record in data.get("profiles", [])}
+    for _ in range(100):
+        value = random_slug(length)
+        if value not in existing:
+            return value
+    raise ValueError("暂时无法生成唯一订阅链接，请重试")
+
+
+def unique_profile_id(data):
+    existing = {str(record.get("id", "")) for record in data.get("profiles", [])}
+    for _ in range(100):
+        value = "profile_" + random_slug()
+        if value not in existing:
+            return value
+    raise ValueError("暂时无法生成唯一配置标识，请重试")
+
+
+def public_profile_record(slug):
+    slug = str(slug or "")
+    record = next((item for item in load_profiles()["profiles"] if record_slug(item) == slug), None)
+    if not record:
+        raise ValueError("订阅链接不存在")
     return record
 
 
@@ -362,31 +399,36 @@ def empty_profile_config(template_path=None):
 
 
 def public_profile(record):
+    slug = record_slug(record)
+    legacy = "slug" not in record
     return {"id": record["id"], "name": record.get("name", record["id"]),
-            "protected": bool(record.get("protected")),
-            "url": "/clash" if record["id"] == "clash" else "/sub/" + record["id"]}
+            "protected": bool(record.get("protected")), "slug": slug,
+            "customSlug": bool(record.get("customSlug", legacy)),
+            "url": "/clash" if legacy and record["id"] == "clash" else "/sub/" + quote(slug, safe="")}
 
 
 def list_profiles():
     return [public_profile(x) for x in load_profiles()["profiles"]]
 
 
-def valid_profile_id(value):
-    value = str(value or "").strip().lower()
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,39}", value):
-        raise ValueError("链接标识只能使用 2-40 位小写字母、数字、横线或下划线")
-    if value in {"admin", "sub", "clash"}:
+def valid_profile_slug(value):
+    value = str(value or "").strip().strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9._~!*'()@:-]{1,80}", value):
+        raise ValueError("自定义链接标识只能使用 1–80 位 URL 安全字符")
+    if value.lower() in {".", "..", "admin", "api", "sub", "convert", "clash"}:
         raise ValueError("该链接标识已被系统保留")
     return value
 
 
 def create_profile(payload):
     data = load_profiles()
-    profile_id = valid_profile_id(payload.get("id"))
+    profile_id = unique_profile_id(data)
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValueError("订阅名称不能为空")
-    if any(x["id"] == profile_id for x in data["profiles"]):
+    custom_slug = bool(payload.get("customSlug"))
+    slug = valid_profile_slug(payload.get("slug")) if custom_slug else unique_slug(data)
+    if any(record_slug(item) == slug for item in data["profiles"]):
         raise ValueError("订阅链接标识已经存在")
     template_id = str(payload.get("templateId", "blank"))
     if template_id == "blank":
@@ -406,7 +448,8 @@ def create_profile(payload):
             "doc": copy.deepcopy(doc),
             "text": text,
         }
-    data["profiles"].append({"id": profile_id, "name": name, "protected": False, "files": [str(path)]})
+    data["profiles"].append({"id": profile_id, "name": name, "protected": False,
+                             "slug": slug, "customSlug": custom_slug, "files": [str(path)]})
     save_profiles(data)
     return public_profile(data["profiles"][-1])
 
@@ -421,18 +464,17 @@ def update_profile(payload):
     if not name:
         raise ValueError("订阅名称不能为空")
     record["name"] = name
-    if not record.get("protected"):
-        new_id = valid_profile_id(payload.get("id"))
-        if new_id != old_id and any(x["id"] == new_id for x in data["profiles"]):
-            raise ValueError("新的链接标识已经存在")
-        if new_id != old_id:
-            old_path = Path(record["files"][0])
-            new_path = PROFILES_DIR / f"{new_id}.yaml"
-            old_path.rename(new_path)
-            with CONFIG_CACHE_LOCK:
-                CONFIG_CACHE.pop(str(old_path.resolve()), None)
-            record["id"] = new_id
-            record["files"] = [str(new_path)]
+    custom_slug = bool(payload.get("customSlug"))
+    if custom_slug:
+        new_slug = valid_profile_slug(payload.get("slug"))
+    elif record.get("customSlug", "slug" not in record) or not record.get("slug"):
+        new_slug = unique_slug(data)
+    else:
+        new_slug = record_slug(record)
+    if any(item["id"] != old_id and record_slug(item) == new_slug for item in data["profiles"]):
+        raise ValueError("新的链接标识已经存在")
+    record["slug"] = new_slug
+    record["customSlug"] = custom_slug
     save_profiles(data)
     return public_profile(record)
 
@@ -1334,7 +1376,7 @@ def conversion_report(profile_id=None):
                     skipped.append({"name": node.get("name", "未知节点"), "type": node.get("type", ""), "reason": str(error)})
         result.append({"id": format_id, "name": info["name"], "note": info["note"],
                        "supported": len(supported), "skipped": skipped,
-                       "url": f"/convert/{record['id']}/{format_id}"})
+                       "url": f"/convert/{quote(record_slug(record), safe='')}/{format_id}"})
     return result
 
 
@@ -1862,13 +1904,23 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/admin", "/admin/"):
             return self.page()
         if path == "/clash":
-            return self.subscription("clash")
+            record = profile_record("clash")
+            if "slug" in record:
+                return self.send_error(404)
+            return self.subscription(record["id"])
         if path.startswith("/sub/"):
-            return self.subscription(unquote(path[5:]))
+            try:
+                return self.subscription(public_profile_record(unquote(path[5:]))["id"])
+            except Exception:
+                return self.send_error(404)
         if path.startswith("/convert/"):
             parts = path.strip("/").split("/")
             if len(parts) == 3:
-                return self.converted(unquote(parts[1]), unquote(parts[2]))
+                try:
+                    record = public_profile_record(unquote(parts[1]))
+                    return self.converted(record["id"], unquote(parts[2]))
+                except Exception:
+                    return self.send_error(404)
             return self.send_error(404)
         if not self.authorized():
             return

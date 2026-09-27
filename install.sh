@@ -14,6 +14,10 @@ DOMAIN=""
 CERT_EMAIL=""
 ACCESS_URL=""
 SUBSCRIPTION_URL=""
+HTTP_PORT=""
+HTTPS_PORT=""
+CUSTOM_PORT=""
+ACME_ROOT="/var/lib/mxioc-rule-manager/acme"
 STAGE_DIR=""
 ACTION=""
 PURGE_DATA=0
@@ -71,6 +75,7 @@ usage() {
   sudo bash install.sh                  交互菜单
   sudo bash install.sh --ip             IP 模式（HTTP）
   sudo bash install.sh --domain 域名    域名模式（HTTPS）
+  sudo bash install.sh --fast           极速模式（HTTP，默认端口 5656）
   sudo bash install.sh --update-only    只更新后台程序，不修改现有配置和部署方式
   sudo bash install.sh --reset-auth     重置管理员用户名与密码
   sudo bash install.sh --uninstall      卸载后台并归档保留用户数据
@@ -78,6 +83,7 @@ usage() {
 
 可选参数：
   --email 邮箱      Let's Encrypt 到期通知邮箱
+  --port 端口       IP 或域名模式的自定义访问端口
   --help            显示帮助
 EOF
 }
@@ -118,6 +124,11 @@ parse_args() {
                 MODE="ip"
                 shift
                 ;;
+            --fast)
+                ACTION="install"
+                MODE="fast"
+                shift
+                ;;
             --domain)
                 [[ $# -ge 2 ]] || fatal "--domain 后必须填写域名"
                 ACTION="install"
@@ -128,6 +139,11 @@ parse_args() {
             --email)
                 [[ $# -ge 2 ]] || fatal "--email 后必须填写邮箱"
                 CERT_EMAIL="$2"
+                shift 2
+                ;;
+            --port)
+                [[ $# -ge 2 ]] || fatal "--port 后必须填写端口"
+                CUSTOM_PORT="$2"
                 shift 2
                 ;;
             --update-only)
@@ -164,21 +180,23 @@ choose_action() {
     say "${C_CYAN}请选择要执行的操作${C_RESET}"
     say "  ${C_GREEN}1)${C_RESET} IP 部署模式      ${C_DIM}通过 http://服务器IP 访问${C_RESET}"
     say "  ${C_GREEN}2)${C_RESET} 域名 HTTPS 模式  ${C_DIM}校验解析后自动申请并续期证书（推荐）${C_RESET}"
-    say "  ${C_GREEN}3)${C_RESET} 升级 / 修复       ${C_DIM}更新后台程序，保留全部用户数据${C_RESET}"
-    say "  ${C_GREEN}4)${C_RESET} 重置管理员凭证   ${C_DIM}修改登录用户名和密码${C_RESET}"
-    say "  ${C_YELLOW}5)${C_RESET} 卸载并保留数据   ${C_DIM}先归档用户数据，再移除后台${C_RESET}"
-    say "  ${C_RED}6)${C_RESET} 彻底卸载           ${C_DIM}同时删除后台数据和主订阅${C_RESET}"
+    say "  ${C_GREEN}3)${C_RESET} 极速安装模式      ${C_DIM}零配置启动，默认使用 5656 端口${C_RESET}"
+    say "  ${C_GREEN}4)${C_RESET} 升级 / 修复       ${C_DIM}更新后台程序，保留全部用户数据${C_RESET}"
+    say "  ${C_GREEN}5)${C_RESET} 重置管理员凭证   ${C_DIM}修改登录用户名和密码${C_RESET}"
+    say "  ${C_YELLOW}6)${C_RESET} 卸载并保留数据   ${C_DIM}先归档用户数据，再移除后台${C_RESET}"
+    say "  ${C_RED}7)${C_RESET} 彻底卸载           ${C_DIM}同时删除后台数据和主订阅${C_RESET}"
     say "  ${C_RED}0)${C_RESET} 退出"
     say ""
     local choice=""
-    prompt_value choice "请输入选项 [0-6]："
+    prompt_value choice "请输入选项 [0-7]："
     case "${choice}" in
         1) ACTION="install"; MODE="ip" ;;
         2) ACTION="install"; MODE="domain" ;;
-        3) ACTION="update" ;;
-        4) ACTION="reset-auth" ;;
-        5) ACTION="uninstall"; PURGE_DATA=0 ;;
-        6) ACTION="uninstall"; PURGE_DATA=1 ;;
+        3) ACTION="install"; MODE="fast" ;;
+        4) ACTION="update" ;;
+        5) ACTION="reset-auth" ;;
+        6) ACTION="uninstall"; PURGE_DATA=0 ;;
+        7) ACTION="uninstall"; PURGE_DATA=1 ;;
         0) exit 0 ;;
         *) fatal "无效选项：${choice}" ;;
     esac
@@ -276,6 +294,84 @@ collect_server_ips() {
     info "检测到本机公网地址：${SERVER_IPS[*]}"
 }
 
+validate_port() {
+    local value="$1"
+    [[ "${value}" =~ ^[0-9]+$ ]] && (( value >= 1 && value <= 65535 )) \
+        || fatal "端口必须是 1–65535 之间的数字：${value}"
+}
+
+port_in_use() {
+    local port="$1"
+    ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq ":${port}$"
+}
+
+port_used_by_nginx() {
+    local port="$1"
+    ss -H -ltnp 2>/dev/null | grep -E ":${port}[[:space:]]" | grep -q nginx
+}
+
+random_free_port() {
+    local candidate=""
+    local attempt
+    for attempt in {1..20}; do
+        candidate="$(python3 -c 'import socket
+for family, address in ((socket.AF_INET6, ("::", 0)), (socket.AF_INET, ("", 0))):
+    try:
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.bind(address)
+        print(sock.getsockname()[1])
+        sock.close()
+        break
+    except OSError:
+        pass' || true)"
+        if [[ -n "${candidate}" ]] && ! port_in_use "${candidate}"; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+    fatal "暂时无法自动找到空闲端口，请使用 --port 手动指定。"
+}
+
+configure_access_port() {
+    local selected="${CUSTOM_PORT}"
+    case "${MODE}" in
+        fast)
+            selected="${selected:-5656}"
+            validate_port "${selected}"
+            if port_in_use "${selected}"; then
+                local previous="${selected}"
+                selected="$(random_free_port)"
+                warn "极速模式默认端口 ${previous} 已被占用，已自动改用空闲端口 ${selected}。"
+            fi
+            HTTP_PORT="${selected}"
+            ;;
+        ip)
+            if [[ -z "${selected}" ]]; then
+                prompt_value selected "请输入 HTTP 访问端口 [80]：" "80"
+            fi
+            validate_port "${selected}"
+            if port_in_use "${selected}" && ! port_used_by_nginx "${selected}"; then
+                fatal "端口 ${selected} 已被其他程序占用，请更换端口。"
+            fi
+            HTTP_PORT="${selected}"
+            ;;
+        domain)
+            if [[ -z "${selected}" ]]; then
+                prompt_value selected "请输入 HTTPS 访问端口 [443]：" "443"
+            fi
+            validate_port "${selected}"
+            [[ "${selected}" != "80" ]] || fatal "HTTPS 访问端口不能使用 80；80 端口需要保留给证书验证。"
+            if port_in_use "${selected}" && ! port_used_by_nginx "${selected}"; then
+                fatal "端口 ${selected} 已被其他程序占用，请更换端口。"
+            fi
+            if port_in_use 80 && ! port_used_by_nginx 80; then
+                fatal "80 端口被其他程序占用，Let's Encrypt 无法完成证书验证。"
+            fi
+            HTTPS_PORT="${selected}"
+            ;;
+    esac
+}
+
 normalize_domain() {
     DOMAIN="${DOMAIN,,}"
     DOMAIN="${DOMAIN#http://}"
@@ -302,6 +398,18 @@ verify_domain_dns() {
     fi
     normalize_domain
     info "检查 ${DOMAIN} 的 A/AAAA 解析……"
+    local cloudflare_hosted=0
+    local nameservers=""
+    local ns_domain="${DOMAIN}"
+    while [[ "${ns_domain}" == *.* ]]; do
+        nameservers="$(dig +short NS "${ns_domain}" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+        [[ -z "${nameservers}" ]] || break
+        ns_domain="${ns_domain#*.}"
+    done
+    if grep -q 'cloudflare\.com' <<<"${nameservers}"; then
+        cloudflare_hosted=1
+        info "检测到该域名使用 Cloudflare DNS 托管。"
+    fi
     mapfile -t DNS_IPS < <(
         {
             dig +short A "${DOMAIN}" 2>/dev/null || true
@@ -316,11 +424,20 @@ verify_domain_dns() {
         contains_ip "${address}" || mismatched+=("${address}")
     done
     if [[ ${#mismatched[@]} -gt 0 ]]; then
+        if [[ "${cloudflare_hosted}" == "1" ]]; then
+            say "${C_YELLOW}检测到 Cloudflare 小黄云代理可能已开启。${C_RESET}"
+            say "  请进入 Cloudflare → DNS，将 ${DOMAIN} 的代理状态改为“仅 DNS（灰色云朵）”。"
+            say "  等待解析生效后再重新运行 vpn 申请证书。"
+            fatal "必须先关闭 Cloudflare 小黄云，Let's Encrypt 才能直接验证本服务器。"
+        fi
         say "${C_RED}域名解析校验未通过。${C_RESET}"
         say "  域名当前解析：${DNS_IPS[*]}"
         say "  本服务器地址：${SERVER_IPS[*]}"
         say "  不属于本机的记录：${mismatched[*]}"
         fatal "请修正 DNS；如果使用 Cloudflare，请暂时关闭代理云朵并设为“仅 DNS”。"
+    fi
+    if [[ "${cloudflare_hosted}" == "1" ]]; then
+        success "Cloudflare 当前为仅 DNS 状态，可以继续申请证书"
     fi
     success "域名解析正确：${DOMAIN} → ${DNS_IPS[*]}"
 }
@@ -587,8 +704,8 @@ write_ip_nginx() {
     {
         cat <<EOF
 server {
-    listen 80;
-    listen [::]:80;
+    listen ${HTTP_PORT};
+    listen [::]:${HTTP_PORT};
     server_name ${server_name};
 EOF
         proxy_location
@@ -596,17 +713,54 @@ EOF
     } >"${NGINX_CONF}"
 }
 
-write_domain_nginx() {
+write_domain_challenge_nginx() {
+    install -d -m 0755 "${ACME_ROOT}/.well-known/acme-challenge"
     {
         cat <<EOF
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_ROOT};
+        default_type text/plain;
+    }
 EOF
         proxy_location
         echo "}"
     } >"${NGINX_CONF}"
+}
+
+write_domain_tls_nginx() {
+    local redirect_port=""
+    [[ "${HTTPS_PORT}" == "443" ]] || redirect_port=":${HTTPS_PORT}"
+    cat >"${NGINX_CONF}" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_ROOT};
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://\$host${redirect_port}\$request_uri;
+    }
+}
+
+server {
+    listen ${HTTPS_PORT} ssl http2;
+    listen [::]:${HTTPS_PORT} ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+EOF
+    proxy_location >>"${NGINX_CONF}"
+    echo "}" >>"${NGINX_CONF}"
 }
 
 reload_nginx() {
@@ -618,14 +772,33 @@ reload_nginx() {
 
 configure_firewall() {
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-        ufw allow 80/tcp >/dev/null
-        [[ "${MODE}" != "domain" ]] || ufw allow 443/tcp >/dev/null
+        if [[ "${MODE}" == "domain" ]]; then
+            ufw allow 80/tcp >/dev/null
+            ufw allow "${HTTPS_PORT}/tcp" >/dev/null
+        else
+            ufw allow "${HTTP_PORT}/tcp" >/dev/null
+        fi
     fi
     if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-service=http >/dev/null
-        [[ "${MODE}" != "domain" ]] || firewall-cmd --permanent --add-service=https >/dev/null
+        if [[ "${MODE}" == "domain" ]]; then
+            firewall-cmd --permanent --add-port=80/tcp >/dev/null
+            firewall-cmd --permanent --add-port="${HTTPS_PORT}/tcp" >/dev/null
+        else
+            firewall-cmd --permanent --add-port="${HTTP_PORT}/tcp" >/dev/null
+        fi
         firewall-cmd --reload >/dev/null
     fi
+}
+
+main_subscription_path() {
+    python3 -c 'import json, sys, urllib.parse
+try:
+    profiles = json.load(open("/opt/mxioc-rule-manager/profiles.json", encoding="utf-8"))["profiles"]
+    record = next(item for item in profiles if item.get("id") == "clash")
+    slug = record.get("slug")
+    print("/sub/" + urllib.parse.quote(str(slug), safe="") if slug else "/clash")
+except Exception:
+    print("/clash")'
 }
 
 configure_ip_mode() {
@@ -635,13 +808,15 @@ configure_ip_mode() {
     configure_firewall
     local display_ip="${PRIMARY_IP}"
     [[ "${display_ip}" == *:* ]] && display_ip="[${display_ip}]"
-    ACCESS_URL="http://${display_ip}/admin/"
-    SUBSCRIPTION_URL="http://${display_ip}/clash"
+    local authority="${display_ip}"
+    [[ "${HTTP_PORT}" == "80" ]] || authority="${display_ip}:${HTTP_PORT}"
+    ACCESS_URL="http://${authority}/admin/"
+    SUBSCRIPTION_URL="http://${authority}$(main_subscription_path)"
 }
 
 configure_domain_mode() {
     prepare_nginx
-    write_domain_nginx
+    write_domain_challenge_nginx
     reload_nginx
     configure_firewall
 
@@ -657,15 +832,18 @@ configure_domain_mode() {
     fi
 
     info "向 Let's Encrypt 申请 ${DOMAIN} 的 HTTPS 证书……"
-    certbot --nginx --non-interactive --agree-tos --redirect --keep-until-expiring \
+    certbot certonly --webroot -w "${ACME_ROOT}" --non-interactive --agree-tos \
+        --keep-until-expiring --deploy-hook "systemctl reload nginx" \
         "${email_args[@]}" -d "${DOMAIN}"
-    nginx -t
-    systemctl reload nginx
-    systemctl enable --now certbot.timer 2>/dev/null || true
     [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]] || fatal "证书文件未生成。"
+    write_domain_tls_nginx
+    reload_nginx
+    systemctl enable --now certbot.timer 2>/dev/null || true
     success "HTTPS 证书申请及域名绑定完成"
-    ACCESS_URL="https://${DOMAIN}/admin/"
-    SUBSCRIPTION_URL="https://${DOMAIN}/clash"
+    local authority="${DOMAIN}"
+    [[ "${HTTPS_PORT}" == "443" ]] || authority="${DOMAIN}:${HTTPS_PORT}"
+    ACCESS_URL="https://${authority}/admin/"
+    SUBSCRIPTION_URL="https://${authority}$(main_subscription_path)"
 }
 
 show_result() {
@@ -684,10 +862,10 @@ show_result() {
     else
         say "管理员密码：${C_DIM}保留现有密码${C_RESET}"
     fi
-    if [[ "${MODE}" == "ip" ]]; then
-        warn "IP 模式使用 HTTP，登录信息不会经过 TLS 加密；长期使用建议改为域名 HTTPS 模式。"
-    else
+    if [[ "${MODE}" == "domain" ]]; then
         say "证书续期：${C_GREEN}Certbot 自动续期已启用${C_RESET}"
+    else
+        warn "当前模式使用 HTTP，登录信息不会经过 TLS 加密；长期使用建议改为域名 HTTPS 模式。"
     fi
     say ""
 }
@@ -714,6 +892,7 @@ main() {
     detect_system
     install_packages
     collect_server_ips
+    configure_access_port
     [[ "${MODE}" != "domain" ]] || verify_domain_dns
     install_application
     create_initial_config
