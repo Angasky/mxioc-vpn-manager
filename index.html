@@ -921,7 +921,8 @@ code {
       <div class="nav" data-page="dns"><i>◎</i><span>[06] DNS 分流</span></div>
       <div class="nav" data-page="subscriptions"><i>↗</i><span>[07] 订阅工具</span></div>
       <div class="nav" data-page="raw"><i>{ }</i><span>[08] 原始配置</span></div>
-      <div class="nav" data-page="system"><i>⚙</i><span>[09] 系统与备份</span></div>
+      <div class="nav" data-page="system"><i>⚿</i><span>[09] 账号与安全</span></div>
+      <div class="nav" data-page="maintenance"><i>⚙</i><span>[10] 升级与卸载</span></div>
     </div>
     <div class="side-status">
       <span class="status-indicator"></span>
@@ -1044,7 +1045,7 @@ function updatePanel(status) {
       ${status.checkError ? `<div class="error">${esc(status.checkError)}</div>` : ''}
       <div class="toolbar" style="margin-top:16px;">
         <button class="btn" onclick="manualUpdateCheck()">[ ⟳ 立即检查 ]</button>
-        ${status.available ? '<button class="btn primary" onclick="confirmSoftwareUpdate()">[ ⬆ 立即更新 ]</button><button class="btn" onclick="dismissSoftwareUpdate()">[ 暂不更新 ]</button>' : ''}
+        ${status.available ? '<button class="btn primary" onclick="confirmSoftwareUpdate(false)">[ ⬆ 立即升级 ]</button><button class="btn" onclick="dismissSoftwareUpdate()">[ 暂不更新 ]</button>' : '<button class="btn" onclick="confirmSoftwareUpdate(true)">[ ↻ 重新安装当前版本 ]</button>'}
       </div>
       <div class="note">系统每 24 小时自动检查一次 GitHub 仓库。只有点击“立即更新”才会安装；更新程序不会修改现有订阅、节点、规则、域名或证书。</div>
     </section>`;
@@ -1081,7 +1082,7 @@ async function manualUpdateCheck() {
   let status = await checkUpdateNotice(true);
   if (!status) return alert('暂时无法连接仓库检查更新');
   if (!status.available) notice(status.checkError ? '检查失败，请稍后重试' : '当前已经是最新版本');
-  if (S.page === 'system') system();
+  if (S.page === 'maintenance') maintenance();
 }
 
 async function dismissSoftwareUpdate() {
@@ -1089,16 +1090,16 @@ async function dismissSoftwareUpdate() {
     await api('/updates/dismiss', jsonOpt('POST', {}));
     closeModal();
     notice('已忽略本次版本；仓库出现下一次更新时会再次提醒');
-    if (S.page === 'system') system();
+    if (S.page === 'maintenance') maintenance();
   } catch (error) {
     alert(error.message);
   }
 }
 
-async function confirmSoftwareUpdate() {
-  if (!confirm('确认安装仓库最新版本？现有订阅、节点、规则、域名和证书都会保留。')) return;
+async function confirmSoftwareUpdate(force = false) {
+  if (!confirm(force ? '确认重新安装当前版本？现有用户数据都会保留。' : '确认安装仓库最新版本？现有订阅、节点、规则、域名和证书都会保留。')) return;
   try {
-    let result = await api('/updates/apply', jsonOpt('POST', {}));
+    let result = await api('/updates/apply', jsonOpt('POST', { force }));
     let target = result.task.sha;
     closeModal();
     notice('更新任务已启动，后台会自动重启……');
@@ -1145,7 +1146,8 @@ const pageInfo = {
   dns: ['DNS 分流', '按域名规则指定国内阿里/腾讯或海外加密 DNS'],
   subscriptions: ['订阅工具', '批量解析订阅链接并生成多格式转换分享'],
   raw: ['原始配置', '直接编辑并校验底层 Clash / Mihomo YAML'],
-  system: ['系统与备份', '修改管理员密码、查看和恢复历史快照备份']
+  system: ['账号与安全', '修改管理员用户名、密码以及查看历史配置备份'],
+  maintenance: ['升级与卸载', '检查升级、重新安装或安全卸载管理后台']
 };
 
 async function go(page) {
@@ -1162,7 +1164,7 @@ async function go(page) {
 }
 
 function draw() {
-  ({ overview, nodes, chains, groups, rules, dns, subscriptions, raw, system }[S.page] || overview)();
+  ({ overview, nodes, chains, groups, rules, dns, subscriptions, raw, system, maintenance }[S.page] || overview)();
 }
 
 function cards() {
@@ -1728,33 +1730,36 @@ async function raw() {
 }
 
 async function system() {
-  let [d, update] = await Promise.all([api('/backups'), api('/updates')]);
+  let [d, account] = await Promise.all([api('/backups'), api('/account')]);
   $('content').innerHTML = `
-  ${updatePanel(update)}
-
   <section class="panel">
     <div class="panel-head">
       <h3>AUTH_SECURITY // 修改管理员登录凭证</h3>
     </div>
-    <form id="passwordForm" class="grid">
+    <div class="note">// 可以只修改用户名、只修改密码，或同时修改。保存后所有已登录设备都会退出，需要使用新凭证重新登录。</div>
+    <form id="accountForm" class="grid" style="margin-top:16px;">
       <div>
         <label>CURRENT_USERNAME // 当前账号</label>
-        <input id="pwUser" required placeholder="admin">
+        <input id="pwUser" required value="${esc(account.username)}" autocomplete="username">
       </div>
       <div>
         <label>CURRENT_PASSWORD // 当前旧密码</label>
-        <input id="pwOld" type="password" required>
+        <input id="pwOld" type="password" required autocomplete="current-password">
       </div>
       <div>
-        <label>NEW_PASSWORD // 新密码（不少于 10 位）</label>
-        <input id="pwNew" type="password" minlength="10" required>
+        <label>NEW_USERNAME // 新用户名</label>
+        <input id="pwNewUser" required minlength="3" maxlength="64" value="${esc(account.username)}" autocomplete="off">
+      </div>
+      <div>
+        <label>NEW_PASSWORD // 新密码（不修改可留空）</label>
+        <input id="pwNew" type="password" minlength="10" autocomplete="new-password">
       </div>
       <div>
         <label>CONFIRM_NEW_PASSWORD // 确认新密码</label>
-        <input id="pwNew2" type="password" minlength="10" required>
+        <input id="pwNew2" type="password" minlength="10" autocomplete="new-password">
       </div>
       <div class="span2" style="margin-top:14px;">
-        <button class="btn primary">[ 💾 保存并应用新密码 ]</button>
+        <button class="btn primary">[ 💾 保存用户名与密码 ]</button>
       </div>
     </form>
   </section>
@@ -1776,21 +1781,87 @@ async function system() {
     `).join('') : '<div class="empty">暂无备份快照</div>'}
   </section>`;
 
-  $('passwordForm').onsubmit = async e => {
+  $('accountForm').onsubmit = async e => {
     e.preventDefault();
     if ($('pwNew').value !== $('pwNew2').value) return alert('两次输入的新密码不一致');
     try {
-      await api('/password', jsonOpt('POST', {
+      await api('/account', jsonOpt('POST', {
         username: $('pwUser').value,
         current: $('pwOld').value,
-        new: $('pwNew').value
+        newUsername: $('pwNewUser').value,
+        newPassword: $('pwNew').value
       }));
-      alert('密码已成功修改，请重新登录');
+      alert('管理员登录凭证已修改，请使用新用户名和密码重新登录');
       showLogin();
     } catch (x) {
       alert(x.message);
     }
   };
+}
+
+async function maintenance() {
+  let [update, account] = await Promise.all([api('/updates'), api('/account')]);
+  $('content').innerHTML = `
+  ${updatePanel(update)}
+
+  <section class="panel" style="border-color:rgba(255,84,112,.45);">
+    <div class="panel-head">
+      <h3>UNINSTALL_MANAGER // 卸载管理后台</h3>
+      <span class="pill" style="color:var(--red);">DANGER ZONE</span>
+    </div>
+    <div class="note">// “保留数据”会先把订阅、额外配置和备份归档到 /var/backups，再移除管理后台；“彻底清除”还会删除主 Clash 订阅文件。证书及其他 sing-box 文件不会被删除。</div>
+    <form id="uninstallForm" class="grid" style="margin-top:16px;">
+      <div>
+        <label>ADMIN_USERNAME // 当前管理员用户名</label>
+        <input id="uninstallUser" required value="${esc(account.username)}" autocomplete="username">
+      </div>
+      <div>
+        <label>ADMIN_PASSWORD // 当前管理员密码</label>
+        <input id="uninstallPassword" type="password" required autocomplete="current-password">
+      </div>
+      <div>
+        <label>DATA_POLICY // 数据处理方式</label>
+        <select id="uninstallMode">
+          <option value="keep">保留并归档用户数据（推荐）</option>
+          <option value="purge">彻底清除主订阅与后台数据</option>
+        </select>
+      </div>
+      <div>
+        <label>CONFIRMATION // 输入 UNINSTALL</label>
+        <input id="uninstallConfirmation" required autocomplete="off" placeholder="UNINSTALL">
+      </div>
+      <div class="span2" style="margin-top:14px;">
+        <button class="btn danger">[ ⛔ 卸载管理后台 ]</button>
+      </div>
+    </form>
+  </section>`;
+  $('uninstallForm').onsubmit = uninstallManager;
+}
+
+async function uninstallManager(e) {
+  e.preventDefault();
+  let purgeData = $('uninstallMode').value === 'purge';
+  if ($('uninstallConfirmation').value !== 'UNINSTALL') return alert('请输入大写 UNINSTALL 确认卸载');
+  let text = purgeData
+    ? '这会移除管理后台并删除主 Clash 订阅文件。确认彻底卸载？'
+    : '确认卸载管理后台？用户数据会先归档到 /var/backups。';
+  if (!confirm(text)) return;
+  try {
+    let result = await api('/uninstall', jsonOpt('POST', {
+      username: $('uninstallUser').value,
+      password: $('uninstallPassword').value,
+      confirmation: $('uninstallConfirmation').value,
+      purgeData
+    }));
+    $('content').innerHTML = `
+      <section class="panel">
+        <h3>UNINSTALL_STARTED // 卸载任务已启动</h3>
+        <div class="note">管理后台将在几秒内停止，当前页面随后无法继续访问。</div>
+        ${result.backupPath ? `<p>用户数据归档位置：<code>${esc(result.backupPath)}</code></p>` : '<p>已选择彻底清除用户数据。</p>'}
+      </section>`;
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 function openModal(title, html) {

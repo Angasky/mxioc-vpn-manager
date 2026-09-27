@@ -177,7 +177,7 @@ def dismiss_update():
         return update_status()
 
 
-def start_update():
+def start_update(force=False):
     with UPDATE_LOCK:
         status = update_status(force=True)
         if status["updating"]:
@@ -185,7 +185,7 @@ def start_update():
         sha = status["latestSha"]
         if not sha:
             raise ValueError("暂时无法获取仓库最新版本")
-        if sha == status["currentSha"]:
+        if sha == status["currentSha"] and not force:
             raise ValueError("当前已经是最新版本")
         installer_url = f"{REPOSITORY_RAW}/{sha}/install.sh"
         request = Request(installer_url, headers={"User-Agent": "mxioc-vpn-manager-updater"})
@@ -227,6 +227,46 @@ exit "$rc"
             UPDATE_RUNNER_FILE.unlink(missing_ok=True)
             raise
         return marker
+
+
+def start_uninstall(purge_data=False):
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = f"/var/backups/mxioc-rule-manager-{stamp}"
+    runner = Path(f"/run/mxioc-rule-manager-uninstall-{secrets.token_hex(6)}.sh")
+    preserve = "" if purge_data else f"""
+mkdir -p "{backup_dir}"
+tar -czf "{backup_dir}/user-data.tar.gz" \\
+  /etc/sing-box/subscribe /opt/mxioc-rule-manager/profiles.json \\
+  /opt/mxioc-rule-manager/profiles /opt/mxioc-rule-manager/backups \\
+  /etc/mxioc-rule-manager.auth.json /etc/mxioc-rule-manager.auth 2>/dev/null || true
+"""
+    purge = """
+rm -f /etc/sing-box/subscribe/clash-cn-route /etc/sing-box/subscribe/clash-cn-route.yml
+""" if purge_data else ""
+    script = f"""#!/usr/bin/env bash
+set +e
+sleep 2
+{preserve}{purge}systemctl disable --now mxioc-rule-manager.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/mxioc-rule-manager.service
+systemctl daemon-reload >/dev/null 2>&1 || true
+rm -f /etc/nginx/conf.d/mxioc-rule-manager.conf
+nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+rm -f /etc/mxioc-rule-manager.auth.json /etc/mxioc-rule-manager.auth
+rm -rf /opt/mxioc-rule-manager
+rm -f -- "$0"
+"""
+    runner.write_text(script, encoding="utf-8", newline="\n")
+    os.chmod(runner, 0o700)
+    unit = "mxioc-self-uninstall-" + secrets.token_hex(5)
+    try:
+        subprocess.Popen([
+            "systemd-run", "--unit", unit, "--collect", "--property=Type=oneshot",
+            "/bin/bash", str(runner),
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception:
+        runner.unlink(missing_ok=True)
+        raise
+    return {"purgeData": bool(purge_data), "backupPath": "" if purge_data else backup_dir}
 
 
 def update_checker_loop():
@@ -436,6 +476,25 @@ def save_auth(username, salt, digest):
     os.chmod(AUTH, 0o600)
 
 
+def update_auth(current_username, current_password, new_username="", new_password=""):
+    if not authenticate(current_username, current_password):
+        raise ValueError("当前用户名或密码错误")
+    auth = load_auth()
+    username = str(new_username or auth["username"]).strip()
+    if not 3 <= len(username) <= 64 or ":" in username or any(char.isspace() for char in username):
+        raise ValueError("新用户名需要为 3–64 位，且不能包含空格或冒号")
+    password = str(new_password or "")
+    if password and len(password) < 10:
+        raise ValueError("新密码至少需要 10 位")
+    if password:
+        salt, digest = password_hash(password)
+    else:
+        salt, digest = auth["salt"], auth["hash"]
+    save_auth(username, salt, digest)
+    clear_sessions()
+    return username
+
+
 def authenticate(username, password):
     auth = load_auth()
     _, digest = password_hash(password, auth["salt"])
@@ -533,13 +592,18 @@ def clear_sessions():
         save_sessions_locked()
 
 
-def session_cookie(token):
-    return (f"mxioc_session={token}; Path=/admin; Max-Age={SESSION_TTL}; "
-            "HttpOnly; Secure; SameSite=Strict")
+def session_cookie(token, secure=True):
+    flags = "HttpOnly; SameSite=Strict"
+    if secure:
+        flags += "; Secure"
+    return f"mxioc_session={token}; Path=/admin; Max-Age={SESSION_TTL}; {flags}"
 
 
-def expired_session_cookie():
-    return "mxioc_session=; Path=/admin; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
+def expired_session_cookie(secure=True):
+    flags = "HttpOnly; SameSite=Strict"
+    if secure:
+        flags += "; Secure"
+    return f"mxioc_session=; Path=/admin; Max-Age=0; {flags}"
 
 
 CONFIG_CACHE = {}
@@ -1681,6 +1745,12 @@ def mutate_dns(method, payload):
 class Handler(BaseHTTPRequestHandler):
     server_version = "MxiocManager/3"
 
+    def secure_request(self):
+        forwarded = self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+        if forwarded:
+            return forwarded == "https"
+        return bool(getattr(self.connection, "cipher", None))
+
     def json_out(self, value, status=200, headers=None):
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -1777,6 +1847,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/profiles":
                 self.json_out({"profiles": list_profiles()})
                 return
+            if path == "/admin/api/account":
+                self.json_out({"username": load_auth()["username"]})
+                return
             if path == "/admin/api/updates":
                 self.json_out(update_status())
                 return
@@ -1809,7 +1882,7 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.35)
                     return self.json_out({"error": "用户名或密码错误"}, 401)
                 token = create_session()
-                return self.json_out({"ok": True}, headers={"Set-Cookie": session_cookie(token)})
+                return self.json_out({"ok": True}, headers={"Set-Cookie": session_cookie(token, self.secure_request())})
             except Exception as exc:
                 return self.json_out({"error": str(exc)}, 400)
         if not self.authorized():
@@ -1817,7 +1890,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/admin/api/logout":
                 revoke_session(self.headers.get("Authorization", ""), self.headers.get("Cookie", ""))
-                return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie()})
+                return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie(self.secure_request())})
             data = self.body()
             if path == "/admin/api/profiles":
                 return self.json_out({"ok": True, "profile": create_profile(data)})
@@ -1826,7 +1899,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/updates/dismiss":
                 return self.json_out({"ok": True, **dismiss_update()})
             if path == "/admin/api/updates/apply":
-                return self.json_out({"ok": True, "task": start_update()}, status=202)
+                return self.json_out({"ok": True, "task": start_update(bool(data.get("force")))}, status=202)
+            if path == "/admin/api/account":
+                username = update_auth(
+                    str(data.get("username", "")), str(data.get("current", "")),
+                    str(data.get("newUsername", "")), str(data.get("newPassword", "")),
+                )
+                return self.json_out({"ok": True, "username": username}, headers={
+                    "Set-Cookie": expired_session_cookie(self.secure_request())
+                })
+            if path == "/admin/api/uninstall":
+                if str(data.get("confirmation", "")) != "UNINSTALL":
+                    raise ValueError("请输入 UNINSTALL 确认卸载")
+                if not authenticate(str(data.get("username", "")), str(data.get("password", ""))):
+                    raise ValueError("当前用户名或密码错误")
+                return self.json_out({"ok": True, **start_uninstall(bool(data.get("purgeData")))}, status=202)
             self.select_profile()
             if path == "/admin/api/nodes": mutate_node("POST", data)
             elif path == "/admin/api/nodes/move": move_node(data)
@@ -1845,16 +1932,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/admin/api/rules/move": move_rule(data)
             elif path == "/admin/api/dns": mutate_dns("POST", data)
             elif path == "/admin/api/password":
-                if not authenticate(str(data.get("username", "")), str(data.get("current", ""))):
-                    raise ValueError("当前密码错误")
-                new_password = str(data.get("new", ""))
-                if len(new_password) < 10:
-                    raise ValueError("新密码至少需要 10 位")
-                auth = load_auth()
-                salt, digest = password_hash(new_password)
-                save_auth(auth["username"], salt, digest)
-                clear_sessions()
-                return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie()})
+                username = update_auth(str(data.get("username", "")), str(data.get("current", "")),
+                                       "", str(data.get("new", "")))
+                return self.json_out({"ok": True, "username": username}, headers={
+                    "Set-Cookie": expired_session_cookie(self.secure_request())
+                })
             elif path == "/admin/api/backups/restore":
                 name = Path(str(data.get("name", ""))).name
                 backup = BACKUP_DIR / name

@@ -45,6 +45,16 @@ class PersistentSessionTests(unittest.TestCase):
         for value in ("Max-Age=2592000", "HttpOnly", "Secure", "SameSite=Strict", "Path=/admin"):
             self.assertIn(value, cookie)
 
+    def test_http_cookie_omits_secure_attribute(self):
+        cookie = server.session_cookie("token", secure=False)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        self.assertNotIn("Secure", cookie)
+
+        expired = server.expired_session_cookie(secure=False)
+        self.assertIn("Max-Age=0", expired)
+        self.assertNotIn("Secure", expired)
+
 
 if __name__ == "__main__":
     unittest.main()
