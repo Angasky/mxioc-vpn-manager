@@ -43,10 +43,14 @@
 curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash
 ```
 
-安装器会显示 MXIOC 字符菜单，并提供两种模式：
+安装器会显示 MXIOC 字符菜单，并提供以下操作：
 
 - IP 部署：自动检测服务器公网 IP，通过 HTTP 地址访问。
 - 域名 HTTPS 部署：检查域名全部 A/AAAA 记录是否指向当前服务器，通过后自动申请 Let's Encrypt 证书、绑定 Nginx 并启用续期。
+- 升级/修复：只更新后台程序与内置模板，保留现有配置。
+- 重置管理员凭证：直接在终端重新设置后台用户名和密码，并注销全部旧会话。
+- 卸载并保留数据：先归档用户配置至 `/var/backups`，再移除后台。
+- 彻底卸载：删除后台、后台数据和主 Clash 订阅；其他 sing-box 文件及 TLS 证书不会被删除。
 
 也可以跳过菜单直接指定模式：
 
@@ -56,6 +60,18 @@ curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/inst
 
 # 域名 HTTPS 模式
 curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --domain vpn.example.com --email admin@example.com
+
+# 升级或修复
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --update-only
+
+# 重置管理员用户名与密码
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --reset-auth
+
+# 卸载前归档保留用户数据
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --uninstall
+
+# 彻底卸载后台及主订阅
+curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash -s -- --purge
 ```
 
 重复执行安装器会更新程序和内置模板，但会保留现有节点、规则、订阅配置、管理员账号及历史备份。只有首次安装或在后台新建“空白模板”订阅时，才会使用 `templates/clash.yaml`。

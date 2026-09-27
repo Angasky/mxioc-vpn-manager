@@ -14,7 +14,8 @@ CERT_EMAIL=""
 ACCESS_URL=""
 SUBSCRIPTION_URL=""
 STAGE_DIR=""
-UPDATE_ONLY=0
+ACTION=""
+PURGE_DATA=0
 
 if [[ -t 1 ]]; then
     C_CYAN='\033[1;36m'
@@ -70,6 +71,9 @@ usage() {
   sudo bash install.sh --ip             IP 模式（HTTP）
   sudo bash install.sh --domain 域名    域名模式（HTTPS）
   sudo bash install.sh --update-only    只更新后台程序，不修改现有配置和部署方式
+  sudo bash install.sh --reset-auth     重置管理员用户名与密码
+  sudo bash install.sh --uninstall      卸载后台并归档保留用户数据
+  sudo bash install.sh --purge          彻底卸载后台并删除主订阅
 
 可选参数：
   --email 邮箱      Let's Encrypt 到期通知邮箱
@@ -91,15 +95,31 @@ prompt_value() {
     printf -v "${variable}" '%s' "${answer}"
 }
 
+prompt_secret() {
+    local variable="$1"
+    local message="$2"
+    local answer=""
+    if [[ -r /dev/tty ]]; then
+        read -r -s -p "${message}" answer </dev/tty || true
+        printf '\n' >/dev/tty
+    else
+        read -r -s -p "${message}" answer || true
+        printf '\n'
+    fi
+    printf -v "${variable}" '%s' "${answer}"
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --ip)
+                ACTION="install"
                 MODE="ip"
                 shift
                 ;;
             --domain)
                 [[ $# -ge 2 ]] || fatal "--domain 后必须填写域名"
+                ACTION="install"
                 MODE="domain"
                 DOMAIN="$2"
                 shift 2
@@ -110,7 +130,21 @@ parse_args() {
                 shift 2
                 ;;
             --update-only)
-                UPDATE_ONLY=1
+                ACTION="update"
+                shift
+                ;;
+            --reset-auth)
+                ACTION="reset-auth"
+                shift
+                ;;
+            --uninstall)
+                ACTION="uninstall"
+                PURGE_DATA=0
+                shift
+                ;;
+            --purge)
+                ACTION="uninstall"
+                PURGE_DATA=1
                 shift
                 ;;
             --help|-h)
@@ -124,18 +158,26 @@ parse_args() {
     done
 }
 
-choose_mode() {
-    [[ -n "${MODE}" ]] && return
-    say "${C_CYAN}请选择部署方式${C_RESET}"
+choose_action() {
+    [[ -n "${ACTION}" ]] && return
+    say "${C_CYAN}请选择要执行的操作${C_RESET}"
     say "  ${C_GREEN}1)${C_RESET} IP 部署模式      ${C_DIM}通过 http://服务器IP 访问${C_RESET}"
     say "  ${C_GREEN}2)${C_RESET} 域名 HTTPS 模式  ${C_DIM}校验解析后自动申请并续期证书（推荐）${C_RESET}"
+    say "  ${C_GREEN}3)${C_RESET} 升级 / 修复       ${C_DIM}更新后台程序，保留全部用户数据${C_RESET}"
+    say "  ${C_GREEN}4)${C_RESET} 重置管理员凭证   ${C_DIM}修改登录用户名和密码${C_RESET}"
+    say "  ${C_YELLOW}5)${C_RESET} 卸载并保留数据   ${C_DIM}先归档用户数据，再移除后台${C_RESET}"
+    say "  ${C_RED}6)${C_RESET} 彻底卸载           ${C_DIM}同时删除后台数据和主订阅${C_RESET}"
     say "  ${C_RED}0)${C_RESET} 退出"
     say ""
     local choice=""
-    prompt_value choice "请输入选项 [1-2]："
+    prompt_value choice "请输入选项 [0-6]："
     case "${choice}" in
-        1) MODE="ip" ;;
-        2) MODE="domain" ;;
+        1) ACTION="install"; MODE="ip" ;;
+        2) ACTION="install"; MODE="domain" ;;
+        3) ACTION="update" ;;
+        4) ACTION="reset-auth" ;;
+        5) ACTION="uninstall"; PURGE_DATA=0 ;;
+        6) ACTION="uninstall"; PURGE_DATA=1 ;;
         0) exit 0 ;;
         *) fatal "无效选项：${choice}" ;;
     esac
@@ -369,6 +411,97 @@ perform_update_only() {
     success "后台程序已更新；现有订阅、节点、规则、域名和证书均未修改"
 }
 
+reset_admin_auth() {
+    require_root
+    command -v python3 >/dev/null 2>&1 || fatal "未找到 Python 3。"
+    [[ -d "${APP_DIR}" ]] || fatal "未检测到已安装的 MXIOC 管理后台。"
+
+    local current_username="admin"
+    if [[ -s /etc/mxioc-rule-manager.auth.json ]]; then
+        current_username="$(python3 -c 'import json; print(json.load(open("/etc/mxioc-rule-manager.auth.json", encoding="utf-8")).get("username", "admin"))' 2>/dev/null || echo admin)"
+    fi
+    local new_username=""
+    local new_password=""
+    local confirm_password=""
+    prompt_value new_username "请输入新的管理员用户名 [${current_username}]：" "${current_username}"
+    [[ ${#new_username} -ge 3 && ${#new_username} -le 64 ]] || fatal "用户名长度必须为 3–64 位。"
+    [[ "${new_username}" != *:* && "${new_username}" != *[[:space:]]* ]] || fatal "用户名不能包含空格或冒号。"
+    prompt_secret new_password "请输入新的管理员密码（至少 10 位）："
+    prompt_secret confirm_password "请再次输入新密码："
+    [[ ${#new_password} -ge 10 ]] || fatal "密码至少需要 10 位。"
+    [[ "${new_password}" == "${confirm_password}" ]] || fatal "两次输入的密码不一致。"
+
+    MXIOC_NEW_USERNAME="${new_username}" MXIOC_NEW_PASSWORD="${new_password}" python3 <<'PY'
+import hashlib
+import json
+import os
+import secrets
+from pathlib import Path
+
+path = Path("/etc/mxioc-rule-manager.auth.json")
+salt = secrets.token_hex(16)
+digest = hashlib.pbkdf2_hmac(
+    "sha256", os.environ["MXIOC_NEW_PASSWORD"].encode(), bytes.fromhex(salt), 240000
+).hex()
+temporary = path.with_name(path.name + ".tmp")
+temporary.write_text(json.dumps({
+    "username": os.environ["MXIOC_NEW_USERNAME"],
+    "salt": salt,
+    "hash": digest,
+}), encoding="utf-8")
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+    rm -f "${APP_DIR}/sessions.json" "${APP_DIR}/initial-password.txt" /etc/mxioc-rule-manager.auth
+    systemctl restart "${APP_NAME}" 2>/dev/null || true
+    success "管理员凭证已重置，全部旧登录会话已退出"
+    say "新管理员用户名：${C_YELLOW}${new_username}${C_RESET}"
+}
+
+uninstall_application() {
+    require_root
+    local confirmation=""
+    if [[ "${PURGE_DATA}" == "1" ]]; then
+        warn "彻底卸载会删除后台、后台数据以及主 Clash 订阅文件。"
+        prompt_value confirmation "请输入 PURGE 确认彻底卸载："
+        [[ "${confirmation}" == "PURGE" ]] || fatal "确认文字不正确，已取消卸载。"
+    else
+        warn "即将卸载管理后台；订阅和后台数据会先归档到 /var/backups。"
+        prompt_value confirmation "请输入 UNINSTALL 确认卸载："
+        [[ "${confirmation}" == "UNINSTALL" ]] || fatal "确认文字不正确，已取消卸载。"
+    fi
+
+    local backup_dir=""
+    if [[ "${PURGE_DATA}" != "1" ]]; then
+        backup_dir="/var/backups/mxioc-rule-manager-$(date +%Y%m%d-%H%M%S)"
+        install -d -m 0700 "${backup_dir}"
+        tar -czf "${backup_dir}/user-data.tar.gz" \
+            /etc/sing-box/subscribe "${APP_DIR}/profiles.json" "${APP_DIR}/profiles" \
+            "${APP_DIR}/backups" /etc/mxioc-rule-manager.auth.json \
+            /etc/mxioc-rule-manager.auth 2>/dev/null || true
+        [[ -s "${backup_dir}/user-data.tar.gz" ]] || fatal "用户数据归档失败，已取消卸载。"
+        success "用户数据已归档到 ${backup_dir}/user-data.tar.gz"
+    fi
+
+    systemctl disable --now "${APP_NAME}" >/dev/null 2>&1 || true
+    rm -f -- "${SERVICE_FILE}"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    rm -f -- "${NGINX_CONF}"
+    if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+    rm -f -- /etc/mxioc-rule-manager.auth.json /etc/mxioc-rule-manager.auth
+    if [[ "${PURGE_DATA}" == "1" ]]; then
+        rm -f -- /etc/sing-box/subscribe/clash-cn-route /etc/sing-box/subscribe/clash-cn-route.yml
+    fi
+    rm -rf -- "${APP_DIR}"
+    if [[ "${PURGE_DATA}" == "1" ]]; then
+        success "MXIOC 管理后台及主订阅数据已彻底卸载"
+    else
+        success "MXIOC 管理后台已卸载；用户数据归档已保留"
+    fi
+}
+
 create_initial_config() {
     [[ -s "${CONFIG_FILE}" ]] && {
         success "检测到现有订阅配置，已完整保留"
@@ -532,12 +665,22 @@ show_result() {
 
 main() {
     parse_args "$@"
-    if [[ "${UPDATE_ONLY}" == "1" ]]; then
-        perform_update_only
-        return
-    fi
     banner
-    choose_mode
+    choose_action
+    case "${ACTION}" in
+        update)
+            perform_update_only
+            return
+            ;;
+        reset-auth)
+            reset_admin_auth
+            return
+            ;;
+        uninstall)
+            uninstall_application
+            return
+            ;;
+    esac
     require_root
     detect_system
     install_packages
