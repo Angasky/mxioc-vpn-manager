@@ -204,7 +204,7 @@ class CoreAdapterTests(unittest.TestCase):
 
     def test_tls_success_is_not_enough_for_reality_selection(self):
         self.initialize('xray')
-        self.manager.execute=Mock(return_value=(14,''))
+        self.manager.execute=Mock(return_value=(0,'MXIOC_REALITY_RESULT 0 FAIL\n'))
         data={'results':[{'domain':'public.example.com','ok':True,'address':'8.8.8.8','latencyMs':10}]}
         result=self.manager.verify_reality_snis(Mock(),self.manager.record(self.identity),data)
         self.assertFalse(result['results'][0]['ok'])
@@ -213,17 +213,88 @@ class CoreAdapterTests(unittest.TestCase):
 
     def test_reality_probe_is_loopback_only_cached_and_has_cleanup(self):
         self.initialize('xray')
-        self.manager.execute=Mock(return_value=(0,'MXIOC_REALITY_OK\n'))
+        self.manager.execute=Mock(return_value=(0,'MXIOC_REALITY_RESULT 0 OK\n'))
         row={'domain':'public.example.com','ok':True,'address':'8.8.8.8'}
         for _ in range(2):
             result=self.manager.verify_reality_snis(Mock(),self.manager.record(self.identity),{'results':[row]})
             self.assertTrue(result['results'][0]['realityVerified'])
         self.manager.execute.assert_called_once()
         script=self.manager.execute.call_args.args[2]
-        self.assertIn('trap cleanup EXIT',script);self.assertIn('timeout 18',script)
+        self.assertIn('trap cleanup EXIT',script);self.assertIn('timeout 75',script)
         self.assertIn('for attempt in 1 2',script);self.assertIn('reality-probe.invalid',script)
         self.assertNotIn('0.0.0.0',script)
         subprocess.run(['bash','-n'],input=script,text=True,check=True)
+
+    def test_batch_partial_failure_is_not_selectable_and_force_bypasses_cache(self):
+        self.initialize('xray')
+        self.manager.execute=Mock(return_value=(0,'MXIOC_REALITY_RESULT 0 OK\nMXIOC_REALITY_RESULT 1 FAIL\n'))
+        rows=[{'domain':name,'ok':True,'address':'8.8.8.8'} for name in ('good.example.com','bad.example.com')]
+        for _ in range(2):
+            result=self.manager.verify_reality_snis(Mock(),self.manager.record(self.identity),{'results':rows})
+            self.assertTrue(result['results'][0]['realityVerified'])
+            self.assertEqual(result['results'][0]['verifiedAddress'],'8.8.8.8')
+            self.assertFalse(result['results'][1]['ok'])
+        self.manager.execute.assert_called_once()
+        self.manager.verify_reality_snis(Mock(),self.manager.record(self.identity),{'results':rows},force=True)
+        self.assertEqual(self.manager.execute.call_count,2)
+
+    def test_tls_probe_retries_an_unreachable_first_ipv6_address(self):
+        self.initialize('xray')
+        def execute(ssh,record,script,**kwargs):
+            probe=script.split("MXIOC_SNI'\n",1)[1].rsplit('\nMXIOC_SNI',1)[0]
+            first,second=MagicMock(),MagicMock()
+            first.__enter__.return_value=first;second.__enter__.return_value=second
+            first.connect.side_effect=OSError('IPv6 route unavailable')
+            tls=MagicMock();tls.__enter__.return_value.version.return_value='TLSv1.3'
+            tls.__enter__.return_value.selected_alpn_protocol.return_value='h2'
+            context=MagicMock();context.wrap_socket.return_value=tls
+            addresses=[(socket.AF_INET6,socket.SOCK_STREAM,6,'',('2606:4700:4700::1111',443,0,0)),
+                       (socket.AF_INET,socket.SOCK_STREAM,6,'',('8.8.8.8',443))]
+            output=io.StringIO()
+            with contextlib.redirect_stdout(output),patch('socket.getaddrinfo',return_value=addresses), \
+                    patch('socket.socket',side_effect=[first,second]),patch('ssl.create_default_context',return_value=context):
+                exec(compile(probe,'<fallback-address-test>','exec'),{})
+            first.connect.assert_called_once();second.connect.assert_called_once()
+            return 0,output.getvalue()
+        self.manager.execute=Mock(side_effect=execute)
+        self.manager.verify_reality_snis=Mock(side_effect=lambda ssh,record,result:result)
+        result=self.manager.test_sni(self.identity,['example.com'])
+        self.assertTrue(result['results'][0]['ok'])
+        self.assertEqual(result['results'][0]['address'],'8.8.8.8')
+
+    def test_python_free_tls_probe_retries_public_addresses(self):
+        self.initialize('xray')
+        def execute(ssh,record,script,**kwargs):
+            if 'MXIOC_SNI' in script:return 127,'python missing'
+            if 'getent ahosts' in script:return 0,'example.com 1.1.1.1\nexample.com 8.8.8.8\n'
+            if 'example.com:443:1.1.1.1' in script:return 28,'timeout'
+            self.assertIn('example.com:443:8.8.8.8',script)
+            return 0,'0.080'
+        self.manager.execute=Mock(side_effect=execute)
+        self.manager.verify_reality_snis=Mock(side_effect=lambda ssh,record,result:result)
+        result=self.manager.test_sni(self.identity,['example.com'])
+        self.assertTrue(result['results'][0]['ok'])
+        self.assertEqual(result['results'][0]['address'],'8.8.8.8')
+        self.assertNotIn('error',result['results'][0])
+
+    def test_incomplete_batch_does_not_cache_or_select_missing_results(self):
+        self.initialize('xray')
+        self.manager.execute=Mock(return_value=(0,''))
+        row={'domain':'example.com','ok':True,'address':'8.8.8.8'}
+        result=self.manager.verify_reality_snis(Mock(),self.manager.record(self.identity),{'results':[row]})
+        self.assertFalse(result['results'][0]['ok'])
+        self.assertIn('未返回',result['results'][0]['error'])
+        self.assertFalse(self.manager.sni_cache)
+
+    def test_forced_failed_tls_invalidates_previous_success(self):
+        self.initialize('xray')
+        import time
+        record=self.manager.record(self.identity)
+        key=(record['id'],record.get('fingerprint'),'example.com','8.8.8.8')
+        self.manager.sni_cache[key]=(time.monotonic(),True)
+        result=self.manager.verify_reality_snis(Mock(),record,{'results':[{'domain':'example.com','ok':False,'error':'TLS failed'}]},force=True)
+        self.assertFalse(result['results'][0]['ok'])
+        self.assertNotIn(key,self.manager.sni_cache)
 
 
 if __name__ == '__main__':

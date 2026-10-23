@@ -2308,7 +2308,7 @@ function remoteNodeForm(relay) {
     e.preventDefault(); const serverId = S.serverId, profile = S.profile, autoImport = $('rnImport').checked;
     let created = false;
     $('rnSave').disabled = true;
-    const payload = {serverId, certFile:$('rnCert')?.value, keyFile:$('rnKey')?.value, path:$('rnPath')?.value, remark:val('rnName'),port:val('rnPort'),serverName:val('rnSni'),sniVerified:$('rnSni')?.dataset.sniVerified === val('rnSni'),template:relay ? 'vless-reality' : val('rnTemplate'),landingLink:relay ? val('rnLanding') : undefined};
+    const payload = {serverId, certFile:$('rnCert')?.value, keyFile:$('rnKey')?.value, path:$('rnPath')?.value, remark:val('rnName'),port:val('rnPort'),serverName:val('rnSni'),sniVerified:$('rnSni')?.dataset.sniVerified === val('rnSni'),sniAddress:$('rnSni')?.dataset.sniVerified === val('rnSni') ? $('rnSni')?.dataset.sniAddress : undefined,template:relay ? 'vless-reality' : val('rnTemplate'),landingLink:relay ? val('rnLanding') : undefined};
     try {
       const data = await api(relay ? '/servers/relay' : '/servers/inbounds', jsonOpt('POST', payload));
       created = true;
@@ -2323,22 +2323,16 @@ function remoteNodeForm(relay) {
 }
 
 function sniCandidates() {
-  const values = ['www.microsoft.com','www.apple.com','www.cloudflare.com','www.amazon.com',
-    'www.bing.com','www.microsoftonline.com','login.microsoftonline.com','learn.microsoft.com','azure.microsoft.com','www.office.com','www.xbox.com','www.live.com',
-    'www.icloud.com','developer.apple.com','support.apple.com','apps.apple.com','music.apple.com','www.cdn-apple.com',
-    'www.google.com','www.gstatic.com','fonts.googleapis.com','www.youtube.com','www.android.com','developer.android.com',
-    'aws.amazon.com','www.amazon.co.jp','www.amazon.co.uk','www.twitch.tv',
-    'www.github.com','github.com','api.github.com','raw.githubusercontent.com','github.blog','www.gitlab.com',
-    'www.mozilla.org','www.firefox.com','www.wikipedia.org','www.wikimedia.org','www.python.org','www.rust-lang.org','www.kernel.org',
-    'www.docker.com','hub.docker.com','www.npmjs.com','nodejs.org','www.debian.org','ubuntu.com',
-    'www.adobe.com','www.autodesk.com','www.nvidia.com','www.amd.com','www.intel.com','www.samsung.com','www.sony.com',
-    'www.digitalocean.com','www.linode.com','www.hetzner.com','www.ovhcloud.com','www.fastly.com','www.akamai.com','www.oracle.com',
-    'www.speedtest.net','www.dropbox.com','www.spotify.com','www.paypal.com','www.salesforce.com','www.shopify.com','www.zoom.com','www.slack.com'];
-  (S.data?.nodes || []).forEach(n => {
-    const cfg = n.config || {};
-    if (cfg.servername || cfg.sni) values.push(cfg.servername || cfg.sni);
-  });
-  return [...new Set(values.map(x=>String(x).trim().toLowerCase()).filter(Boolean))].slice(0,200);
+  return ['www.rust-lang.org','www.fastly.com','www.mozilla.org','www.python.org',
+    'www.firefox.com','www.kernel.org','www.twitch.tv','www.docker.com',
+    'raw.githubusercontent.com','www.npmjs.com','www.digitalocean.com','apps.apple.com',
+    'www.amazon.co.uk','www.icloud.com','hub.docker.com','www.gitlab.com',
+    'music.apple.com','aws.amazon.com','nodejs.org','www.cloudflare.com',
+    'www.gstatic.com','www.amazon.com','www.amazon.co.jp','developer.android.com',
+    'fonts.googleapis.com','www.youtube.com','www.android.com','www.google.com',
+    'www.ovhcloud.com','www.debian.org','api.github.com','ubuntu.com','www.github.com',
+    'github.com','www.wikipedia.org','www.apple.com','developer.apple.com','www.xbox.com',
+    'learn.microsoft.com','www.autodesk.com','www.wikimedia.org','support.apple.com'];
 }
 
 function closeSniScanner() {
@@ -2362,32 +2356,32 @@ function openSniScanner(serverId,targetId) {
   const render=()=>{
     const sorted=[...view.results].sort((a,b)=>(a.latencyMs??Infinity)-(b.latencyMs??Infinity));
     const usable=sorted.filter(r=>r.ok && r.realityVerified), failed=sorted.filter(r=>!r.ok || !r.realityVerified);
-    const row=r=>`<div class="sni-result"><div><strong>${esc(r.domain)}</strong><small>${r.ok && r.realityVerified ? esc(r.tls)+' · Reality 双次实测通过' : esc(r.error || '未通过实际 Reality 验证')}</small></div><span class="${r.ok && r.realityVerified?'sni-latency':'hint'}">${r.ok && r.realityVerified?esc(r.latencyMs)+' ms':'不可选'}</span><button type="button" class="btn small" data-sni-domain="${esc(r.domain)}" ${r.ok && r.realityVerified?'':'disabled'}>选择</button></div>`;
+    const row=r=>`<div class="sni-result"><div><strong>${esc(r.domain)}</strong><small>${r.ok && r.realityVerified ? esc(r.tls)+' · Reality 双次实测通过'+(r.cached?' · 缓存':'') : esc(r.error || '未通过实际 Reality 验证')}</small></div><span class="${r.ok && r.realityVerified?'sni-latency':'hint'}">${r.ok && r.realityVerified?esc(r.latencyMs)+' ms':'不可选'}</span><button type="button" class="btn small" data-sni-domain="${esc(r.domain)}" data-sni-address="${esc(r.verifiedAddress || '')}" ${r.ok && r.realityVerified?'':'disabled'}>选择</button></div>`;
     $('sniScanResults').innerHTML=usable.map(row).join('')+(failed.length?`<details class="sni-failures"><summary>已隐藏 ${failed.length} 个未通过验证的目标 · 查看原因</summary>${failed.map(row).join('')}</details>`:'');
     dialog.querySelectorAll('[data-sni-domain]').forEach(button=>button.onclick=()=>{
-      if(valid()) {target.value=button.dataset.sniDomain;target.dataset.sniVerified=button.dataset.sniDomain;target.dispatchEvent(new Event('input',{bubbles:true}));closeSniScanner();}
+      if(valid()) {target.value=button.dataset.sniDomain;target.dataset.sniVerified=button.dataset.sniDomain;target.dataset.sniAddress=button.dataset.sniAddress;target.dispatchEvent(new Event('input',{bubbles:true}));closeSniScanner();}
     });
   };
-  const scan=async()=>{
+  const scan=async(force=false)=>{
     if(view.running || !valid()) return;
     const candidates=[...new Set($('sniScanList').value.split(/\s+/).filter(Boolean))];
     if(!candidates.length || candidates.length>200) { $('sniProgress').textContent='请填写 1–200 个候选域名'; return; }
     view.running=true;view.results=[];view.errors=[];render();$('sniRescan').disabled=true;
-    const queue=[];for(let i=0;i<candidates.length;i+=5)queue.push(candidates.slice(i,i+5));
+    const queue=[];for(let i=0;i<candidates.length;i+=14)queue.push(candidates.slice(i,i+14));
     let completed=0;
     const progress=()=>{$('sniProgress').textContent=`已测试 ${completed} / ${candidates.length} · Reality 可用 ${view.results.filter(r=>r.ok && r.realityVerified).length}${view.errors.length?' · '+view.errors.join('；'):''}`;$('sniScanProgress').value=completed/candidates.length*100;};
     progress();
-    await Promise.all(Array.from({length:Math.min(1,queue.length)},async()=>{
+    await Promise.all(Array.from({length:Math.min(2,queue.length)},async()=>{
       while(queue.length && valid()) {
         const batch=queue.shift();
-        try {const data=await api('/servers/sni',{...jsonOpt('POST',{serverId,candidates:batch}),signal:view.controller.signal});if(!valid())return;view.results.push(...data.results);}
+        try {const data=await api('/servers/sni',{...jsonOpt('POST',{serverId,candidates:batch,force}),signal:view.controller.signal});if(!valid())return;view.results.push(...data.results);}
         catch(error){if(!valid())return;view.errors.push(error.message);}
         completed+=batch.length;if(valid()){progress();render();}
       }
     }));
     view.running=false;if(valid())$('sniRescan').disabled=false;
   };
-  $('sniRescan').onclick=scan;void scan();
+  $('sniRescan').onclick=()=>scan(true);void scan();
 }
 
 async function bindRemoteNode(id) {
@@ -3258,7 +3252,7 @@ async function chainModal(index) {
     if (button) button.disabled = true;
     try {
       let body = {
-        mode: val('chainMode'), port: val('chainPort'), serverName: val('chainSni'), sniVerified:$('chainSni')?.dataset.sniVerified === val('chainSni'),
+        mode: val('chainMode'), port: val('chainPort'), serverName: val('chainSni'), sniVerified:$('chainSni')?.dataset.sniVerified === val('chainSni'),sniAddress:$('chainSni')?.dataset.sniVerified === val('chainSni') ? $('chainSni')?.dataset.sniAddress : undefined,
         name: val('chainName'),
         entry: val('chainEntry'),
         exit: val('chainExit'),

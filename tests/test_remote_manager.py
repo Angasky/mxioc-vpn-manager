@@ -386,6 +386,19 @@ class RemoteManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'过期'):
             self.manager.verified_template_payload(record,{'sniVerified':True})
 
+    def test_selected_address_is_pinned_and_valid_for_ten_minutes_only(self):
+        import time
+        record=self.manager.record(self.identity)
+        now=time.monotonic()
+        prefix=(record['id'],record.get('fingerprint'),'raw.githubusercontent.com')
+        self.manager.sni_cache[prefix+('8.8.8.8',)]=(now-300,True)
+        self.manager.sni_cache[prefix+('1.1.1.1',)]=(now,True)
+        payload={'sniVerified':True,'sniAddress':'8.8.8.8'}
+        self.assertEqual(self.manager.verified_template_payload(record,payload)['_verifiedRealityAddress'],'8.8.8.8')
+        self.manager.sni_cache[prefix+('8.8.8.8',)]=(now-601,True)
+        with self.assertRaisesRegex(ValueError,'过期'):
+            self.manager.verified_template_payload(record,payload)
+
 
 class PanelTunnelTests(unittest.TestCase):
     def test_https_loopback_inside_ssh_tunnel_supports_panel_certificate(self):

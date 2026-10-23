@@ -3594,7 +3594,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/servers/attach":
                 return self.json_out(remote_manager().attach_existing(str(data.get("id", ""))))
             if path == "/admin/api/servers/sni":
-                return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates")))
+                return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates"), force=data.get("force") is True))
             if path == "/admin/api/servers/import":
                 self.select_profile()
                 return self.json_out({"ok": True, **import_server_inbound(data)})

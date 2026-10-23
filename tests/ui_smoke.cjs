@@ -62,7 +62,7 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
  $('rnName').value='tuic-test';$('rnCert').value='/etc/cert.pem';$('rnKey').value='/etc/key.pem';await $('remoteNodeForm').onsubmit({preventDefault(){}});
  const node=JSON.parse(requests.find(r=>r[0]==='/servers/inbounds')[1].body);assert.equal(node.template,'tuic');assert.equal(node.certFile,'/etc/cert.pem');
  t.setApi(async(path,opt)=>({results:JSON.parse(opt.body).candidates.map(domain=>({domain,ok:true,realityVerified:true,latencyMs:20,tls:'TLSv1.3',alpn:'h2'}))}));
- assert(t.sniCandidates().length>=60);assert($('rnSniTest'));assert(!$('rnSniList'));
+ assert.equal(t.sniCandidates().length,42);assert(!t.sniCandidates().includes('www.microsoft.com'));assert($('rnSniTest'));assert(!$('rnSniList'));
  t.S.profile='clash';t.S.page='nodes';t.S.profiles=[{id:'clash',name:'test'}];
  t.setApi(async(path)=>{assert.equal(path,'/servers','creation picker must not contact inbounds');return {servers:t.S.servers};});
  await t.chooseNodeServer('create');await $('pickerOpen').onclick();assert($('remoteNodeForm'));assert(!$('pickerError'));

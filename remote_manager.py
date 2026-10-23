@@ -1073,7 +1073,7 @@ systemctl enable mxioc-meter-restore.service
                 raise ValueError("内核计量计数器缺失，不能将用量当作零")
         return values
 
-    def test_sni(self, server_id, candidates):
+    def test_sni(self, server_id, candidates, force=False):
         if not isinstance(candidates, list) or not 1 <= len(candidates) <= 20:
             raise ValueError("每次测试 1–20 个 SNI 域名")
         domains = list(dict.fromkeys(valid_domain(x) for x in candidates))
@@ -1093,13 +1093,24 @@ def probe(name):
         context = ssl.create_default_context()
         context.minimum_version = ssl.TLSVersion.TLSv1_3
         context.set_alpn_protocols(['h2', 'http/1.1'])
-        family, socktype, proto, _, address = addresses[0]
-        with socket.socket(family, socktype, proto) as raw:
-            raw.settimeout(4)
-            raw.connect(address)
-            with context.wrap_socket(raw, server_hostname=name) as tls:
-                result.update(ok=True, latencyMs=round((time.monotonic()-start)*1000, 1),
-                              tls=tls.version(), alpn=tls.selected_alpn_protocol(), address=address[0])
+        # Preserve the server resolver's route preference, but try another public
+        # endpoint if its first IPv4/IPv6 address is unreachable.
+        unique = list({(a[0], a[4][0]): a for a in addresses}.values())
+        failure = None
+        for family, socktype, proto, _, address in unique[:3]:
+            try:
+                attempt = time.monotonic()
+                with socket.socket(family, socktype, proto) as raw:
+                    raw.settimeout(4)
+                    raw.connect(address)
+                    with context.wrap_socket(raw, server_hostname=name) as tls:
+                        result.update(ok=True, latencyMs=round((time.monotonic()-attempt)*1000, 1),
+                                      tls=tls.version(), alpn=tls.selected_alpn_protocol(), address=address[0])
+                break
+            except Exception as exc:
+                failure = exc
+        if not result['ok']:
+            raise failure or ValueError('目标没有可用的公网 TLS 地址')
     except Exception as exc:
         result['error'] = str(exc)[:180]
     return result
@@ -1114,16 +1125,19 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                 result = self.test_sni_curl(ssh, record, domains)
             else:
                 result = {"results": json.loads(raw)}
-            return self.verify_reality_snis(ssh, record, result)
+            return self.verify_reality_snis(ssh, record, result, force=True) if force else self.verify_reality_snis(ssh, record, result)
         finally:
             ssh.close()
 
     def test_sni_curl(self, ssh, record, domains):
         """Python-free fallback. Resolve on the server, validate and pin public IPs."""
         import concurrent.futures
-        resolver = "command -v curl >/dev/null && command -v getent >/dev/null || exit 12\n"
-        for domain in domains:
-            resolver += "getent ahosts " + shlex.quote(domain) + " | awk -v host=" + shlex.quote(domain) + " '{print host, $1}'\n"
+        resolver = "command -v curl >/dev/null && command -v getent >/dev/null && command -v timeout >/dev/null || exit 12\n"
+        for offset in range(0, len(domains), 4):
+            resolver += "pids=''\n"
+            for domain in domains[offset:offset + 4]:
+                resolver += "timeout 3 getent ahosts " + shlex.quote(domain) + " | awk -v host=" + shlex.quote(domain) + " '{print host, $1}' &\npids=\"$pids $!\"\n"
+            resolver += 'for pid in $pids; do wait "$pid" || true; done\n'
         code, raw = self.execute(ssh, record, resolver, timeout=25)
         if code:
             raise ValueError("无 Python 扫描需要 curl、getent 和系统 CA；请安装系统网络工具后重试")
@@ -1141,66 +1155,90 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
             if not values or any(not address.is_global for address in values):
                 result["error"] = "目标未解析到公网地址或解析含非公网地址"
                 return result
-            address = str(sorted(values, key=lambda a: (a.version, int(a)))[0])
-            pinned = '[' + address + ']' if ':' in address else address
-            command = "curl --disable --silent --show-error --head --output /dev/null --noproxy '*' --proto '=https' --tlsv1.3 --tls-max 1.3 --connect-timeout 4 --max-time 6 --resolve " + shlex.quote(domain + ':443:' + pinned) + " --write-out '%{time_appconnect}' " + shlex.quote('https://' + domain + '/')
-            try:
-                code, output = self.execute(ssh, record, command, timeout=10)
-                if code:
-                    result["error"] = "TLS 1.3 握手或证书校验失败：" + output[:160]
-                else:
-                    result.update(ok=True, tls="TLSv1.3", latencyMs=round(float(output.strip()) * 1000, 1), address=address)
-            except Exception as exc:
-                result["error"] = str(exc)[:160]
+            for candidate in sorted(values, key=lambda a: (a.version, int(a)))[:3]:
+                address = str(candidate)
+                pinned = '[' + address + ']' if ':' in address else address
+                command = "curl --disable --silent --show-error --head --output /dev/null --noproxy '*' --proto '=https' --tlsv1.3 --tls-max 1.3 --connect-timeout 4 --max-time 6 --resolve " + shlex.quote(domain + ':443:' + pinned) + " --write-out '%{time_appconnect}' " + shlex.quote('https://' + domain + '/')
+                try:
+                    code, output = self.execute(ssh, record, command, timeout=10)
+                    if code:
+                        result["error"] = "TLS 1.3 握手或证书校验失败：" + output[:160]
+                    else:
+                        result.update(ok=True, tls="TLSv1.3", latencyMs=round(float(output.strip()) * 1000, 1), address=address)
+                        result.pop('error', None)
+                        break
+                except Exception as exc:
+                    result["error"] = str(exc)[:160]
             return result
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
             rows = list(pool.map(probe, domains))
         return {"results": sorted(rows, key=lambda row: row.get("latencyMs", 1e9)), "method": "curl"}
 
-    def verify_reality_snis(self, ssh, record, result):
-        import concurrent.futures
-        from reality_probe import probe_script
+    def verify_reality_snis(self, ssh, record, result, force=False):
+        from reality_probe import probe_batch_script
         with self.lock:
             slots = self.sni_slots.setdefault(record['id'], threading.BoundedSemaphore(2))
-        def verify(row):
-            row = dict(row)
+            if force:
+                domains = {row['domain'] for row in result['results']}
+                for key in list(self.sni_cache):
+                    if key[:2] == (record['id'], record.get('fingerprint')) and key[2] in domains:
+                        del self.sni_cache[key]
+        pending = []
+        rows = [dict(row) for row in result['results']]
+        for row in rows:
             row['realityVerified'] = False
             if not row.get('ok'):
-                return row
+                continue
             row['ok'] = False
             if install_type(record) == 'sing-box':
                 row['error'] = '当前 sing-box 尚无实际 Reality 验证器，未列入可选结果'
-                return row
+                continue
             address = row.get('address')
             try:
                 if not address or not ipaddress.ip_address(address).is_global:
                     raise ValueError('缺少已验证的公网目标地址')
                 key = (record['id'], record.get('fingerprint'), row['domain'], address)
-                with slots:
-                    with self.lock:
-                        cached = self.sni_cache.get(key)
-                    if cached and time.monotonic() - cached[0] < 120:
-                        verified = cached[1]
-                    else:
-                        code, output = self.execute(ssh, record, probe_script(row['domain'], address), timeout=25)
-                        if code == 12:
-                            raise ValueError('服务器缺少 curl 或 timeout，暂不能完成实际验证')
-                        if code == 13:
-                            raise ValueError('服务器未安装可用的 Xray 验证内核，请先安装面板或 Xray')
-                        verified = code == 0 and 'MXIOC_REALITY_OK' in output
-                        with self.lock:
-                            if len(self.sni_cache) >= 512:
-                                self.sni_cache.pop(next(iter(self.sni_cache)))
-                            self.sni_cache[key] = (time.monotonic(), verified)
-                row.update(ok=verified, realityVerified=verified)
-                if not verified:
-                    row['error'] = 'TLS 可连接，但两次实际 Reality 握手未通过；不提供选择'
+                with self.lock:
+                    cached = self.sni_cache.get(key)
+                if not force and cached and time.monotonic() - cached[0] < (600 if cached[1] else 15):
+                    row.update(ok=cached[1], realityVerified=cached[1], cached=True)
+                else:
+                    pending.append((row, key))
             except Exception as exc:
                 row['error'] = 'Reality 验证未完成：' + str(exc)[:160]
+        if pending:
+            try:
+                with slots:
+                    for attempt in range(2):
+                        script = probe_batch_script([(row['domain'], key[3]) for row, key in pending])
+                        code, output = self.execute(ssh, record, script, timeout=80)
+                        if code != 17:
+                            break
+                if code:
+                    raise ValueError({12:'服务器缺少 curl 或 timeout', 13:'服务器未安装可用的 Xray 验证内核',
+                                      16:'隔离测试内核启动失败，请重试扫描',
+                                      17:'随机测试端口已被占用，未触碰现有服务，请重试扫描'}.get(code, '隔离 Reality 批量实测未完成，请重试'))
+                readings = {int(index): value == 'OK' for index, value in re.findall(r'^MXIOC_REALITY_RESULT (\d+) (OK|FAIL)$', output, re.M)}
+                for index, (row, key) in enumerate(pending):
+                    if index not in readings:
+                        row['error'] = '隔离测试未返回此目标结果，请重试'
+                        continue
+                    verified = readings[index]
+                    row.update(ok=verified, realityVerified=verified)
+                    with self.lock:
+                        if len(self.sni_cache) >= 2048:
+                            self.sni_cache.pop(next(iter(self.sni_cache)))
+                        self.sni_cache[key] = (time.monotonic(), verified)
+            except Exception as exc:
+                for row, _ in pending:
+                    row['error'] = 'Reality 验证未完成：' + str(exc)[:160]
+        for row in rows:
+            if row.get('ok') and row.get('realityVerified'):
+                row['verifiedAddress'] = row['address']
+            elif not row.get('error'):
+                row['error'] = 'TLS 可连接，但两次实际 Reality 握手未通过；不提供选择'
             row.pop('address', None)
-            return row
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            result['results'] = list(pool.map(verify, result['results']))
+        result['results'] = rows
         return result
 
     def create_inbound(self, server_id, payload):
@@ -1226,11 +1264,12 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
             return result
         domain = valid_domain(result.get('serverName', 'raw.githubusercontent.com'))
         with self.lock:
-            matches = [key[3] for key, value in self.sni_cache.items()
+            matches = [(value[0], key[3]) for key, value in self.sni_cache.items()
                        if key[:3] == (record['id'], record.get('fingerprint'), domain)
-                       and value[1] and time.monotonic() - value[0] < 120]
+                       and value[1] and time.monotonic() - value[0] < 600
+                       and (not result.get('sniAddress') or result['sniAddress'] == key[3])]
         if matches:
-            result['_verifiedRealityAddress'] = matches[0]
+            result['_verifiedRealityAddress'] = max(matches)[1]
         elif result.get('sniVerified') is True:
             raise ValueError('SNI 实测结果已过期或服务器状态已变化，请重新扫描后创建')
         return result

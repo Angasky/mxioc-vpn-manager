@@ -12,7 +12,7 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    document.getElementById('boot').classList.add('hidden');document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');
    S.profiles=[{id:'clash',name:'test'}];S.data={nodes:[],groups:[],rules:[],profile:{name:'test'}};S.profile='clash';
    window.fixtureServers=Array.from({length:123},(_,i)=>({id:'s'+i,name:'Edge '+i,host:'198.51.100.'+(i%254+1),installType:'xray'}));
-   window.activeSamples=0;window.maxSamples=0;window.sampleCalls=0;window.scanBatches=[];
+   window.activeSamples=0;window.maxSamples=0;window.sampleCalls=0;window.scanBatches=[];window.scanActive=0;window.maxScanActive=0;window.scanForces=[];
    api=async (url,opt)=>{
     if(url==='/servers')return {servers:fixtureServers};
     if(url.startsWith('/servers/metrics')){
@@ -21,9 +21,10 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
      return {serverId:url.split('=')[1],cpuPercent:30,cores:4,load:[.1,.2,.3],memory:{percent:40,used:400,total:1000,swapUsed:0,swapTotal:0},network:{rxBytes:1,txBytes:2,rxBytesPerSecond:3,txBytesPerSecond:4},interfaces:[],summaryInterfaces:[],disks:[{mount:'/',percent:50,available:500,total:1000,used:500}],perCpu:[],addresses:[],uptime:600,sampledAt:1792700000,managementIp:'198.51.100.1',hostname:'edge',os:'Linux',kernel:'6',cpuModel:'CPU'};
     }
     if(url==='/servers/sni'){
-     const body=JSON.parse(opt.body);scanBatches.push(body.candidates);
-     await new Promise(r=>setTimeout(r,30));
-     return {results:body.candidates.map((domain,i)=>({domain,ok:i!==0,realityVerified:i!==0,latencyMs:90-i,tls:'TLSv1.3',alpn:'h2',error:'unavailable'}))};
+     const body=JSON.parse(opt.body);scanBatches.push(body.candidates);scanForces.push(body.force);
+     scanActive++;maxScanActive=Math.max(maxScanActive,scanActive);
+     await new Promise(r=>setTimeout(r,30));scanActive--;
+     return {results:body.candidates.map((domain,i)=>({domain,ok:i!==0,realityVerified:i!==0,verifiedAddress:'8.8.8.8',latencyMs:90-i,tls:'TLSv1.3',alpn:'h2',error:'unavailable'}))};
     }
     throw Error('unexpected request '+url);
    };
@@ -38,11 +39,16 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   await page.evaluate(()=>{stopMonitoring();S.serverId='s1';S.remoteServer={installType:'xray'};remoteNodeForm(true);document.getElementById('rnName').value='Preserved relay';document.getElementById('rnLanding').value='ss://preserved';});
   if(process.env.MXIOC_SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.MXIOC_SCREENSHOT_DIR,'relay-form.png')});
   await page.click('#rnSniTest');await page.waitForFunction(()=>document.getElementById('sniScanProgress')?.value===100);
-  const batches=await page.evaluate(()=>scanBatches);assert(batches.flat().length>=60);assert(batches.every(b=>b.length<=20));
+  const batches=await page.evaluate(()=>scanBatches);assert.equal(batches.flat().length,42);assert.equal(batches.length,3);assert(batches.every(b=>b.length===14));
+  assert.equal(await page.evaluate(()=>maxScanActive),2);
+  assert.deepEqual(await page.evaluate(()=>scanForces),[false,false,false]);
+  await page.click('#sniRescan');await page.waitForFunction(()=>document.getElementById('sniScanProgress')?.value===100);
+  assert.deepEqual(await page.evaluate(()=>scanForces.slice(-3)),[true,true,true]);
   assert(await page.$eval('#sniScanResults button:disabled',el=>el.disabled));
   const selected=await page.$eval('#sniScanResults button:not(:disabled)',el=>el.dataset.sniDomain);
   await page.click('#sniScanResults button:not(:disabled)');assert.equal(await page.$('#sniScanner'),null);
   assert.equal(await page.$eval('#rnSni',el=>el.value),selected);assert.equal(await page.$eval('#rnName',el=>el.value),'Preserved relay');
+  assert.equal(await page.$eval('#rnSni',el=>el.dataset.sniAddress),'8.8.8.8');
   await page.click('#rnSniTest');await page.keyboard.press('Escape');assert.equal(await page.$('#sniScanner'),null);assert(await page.$('#modal:not(.hidden)'));
   for(const theme of ['high','low','pink']){
    await page.setViewport({width:390,height:844});await page.evaluate(theme=>setTheme(theme),theme);
@@ -59,6 +65,6 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   await page.evaluate(()=>stopMonitoring());
   const missing=await page.evaluate(()=>[...document.querySelectorAll('use')].map(el=>el.getAttribute('href')).filter(ref=>!document.querySelector(ref)));
   assert.deepEqual(missing,[]);assert.deepEqual(errors,[]);
-  console.log('PASS: paginated monitor cards, 3-worker sampling, detail/back/search; 60+ SNI candidates, batches, selection, retained form, cancellation, three mobile themes and SVG icon references');
+  console.log('PASS: paginated monitor cards, 3-worker sampling, detail/back/search; curated 42 SNI candidates, three batches, selection, retained form, cancellation, three mobile themes and SVG icon references');
  } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});
