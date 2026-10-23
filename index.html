@@ -2687,17 +2687,72 @@ function nodeMultiplierModal(encoded, inboundId) {
   };
 }
 
+function planDescription(p) {
+  return `${p.durationMonths ?? 12} 个月 · ${p.resetPeriod === 'none' ? '一次性流量' : '每月重置'} · ${p.speedMbps ? p.speedMbps + ' Mbps' : '无限速'} · ${p.multiplier ?? 1} 倍`;
+}
+
+function subscriptionPlanModal(encoded = '') {
+  const id = decodeURIComponent(encoded);
+  const plan = (S.data?.profile?.traffic?.plans || []).find(p => p.id === id);
+  if (id && !plan) return notice('模板不存在，请刷新');
+  const p = plan || {name:'',price:null,monthlyGiB:50,durationMonths:12,resetPeriod:'monthly',speedMbps:0,multiplier:1};
+  const profile = S.profile;
+  openModal(plan ? '编辑套餐模板' : '新建套餐模板', `<form id="planForm"><div class="grid">
+    <div><label for="planName">模板名称</label><input id="planName" maxlength="60" required value="${esc(p.name)}"></div>
+    <div><label for="planPrice">价格（元 / 整个有效期）</label><input id="planPrice" type="number" min="0" max="100000000" step="any" value="${p.price == null ? '' : esc(p.price)}" placeholder="留空表示未设置"></div>
+    <div><label for="planQuota">流量额度（GiB）</label><input id="planQuota" type="number" min="0.001" max="1000000" step="any" required value="${esc(p.monthlyGiB)}"></div>
+    <div><label for="planPeriod">流量周期</label><select id="planPeriod"><option value="monthly">每月重置</option><option value="none">一次性总流量</option></select></div>
+    <div><label for="planMonths">有效期（月）</label><input id="planMonths" type="number" min="1" max="120" step="1" required value="${p.durationMonths ?? 12}"></div>
+    <div><label for="planSpeed">节点上传 / 下载限速（Mbps）</label><input id="planSpeed" type="number" min="0" max="10000" step="0.001" value="${p.speedMbps || 0}"><p class="hint">0 或留空表示无限速；非零至少 0.1 Mbps。</p></div>
+    <div><label for="planMultiplier">节点流量倍率</label><input id="planMultiplier" type="number" min="0" max="100" step="0.001" required value="${p.multiplier ?? 1}"></div>
+    </div><p class="hint">模板由所有订阅共用。保存或删除模板不会修改已套用的订阅；只有点击套用才下发配置。价格仅作备注，不自动收款。</p><div id="planError" class="error" role="alert"></div><button id="planSave" class="btn primary" type="submit">保存模板</button></form>`);
+  $('planPeriod').value = p.resetPeriod || 'monthly';
+  $('planForm').onsubmit = async e => {
+    e.preventDefault(); const button = $('planSave'); button.disabled = true;
+    try {
+      const body = {id: id || undefined, name:$('planName').value, price:$('planPrice').value === '' ? null : Number($('planPrice').value),
+        monthlyGiB:Number($('planQuota').value),durationMonths:Number($('planMonths').value),resetPeriod:$('planPeriod').value,
+        speedMbps:Number($('planSpeed').value || 0),multiplier:Number($('planMultiplier').value)};
+      const result = await api('/traffic/plans', jsonOpt('PUT', body));
+      if (S.profile !== profile) return;
+      S.data.profile.traffic = result.traffic; closeModal();
+      if (S.page === 'traffic') traffic();
+      notice('模板已保存；需要套用后才影响订阅');
+    } catch(error) { if ($('planError')) $('planError').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+}
+
+async function deleteSubscriptionPlan(encoded) {
+  const id = decodeURIComponent(encoded), profile = S.profile;
+  if (!confirm('删除这个套餐模板？已套用订阅的额度、用量、有效期和节点配置保持不变。')) return;
+  try {
+    const result = await api('/traffic/plans/delete', jsonOpt('PUT', {id}));
+    if (S.profile !== profile) return;
+    S.data.profile.traffic = result.traffic; if (S.page === 'traffic') traffic();
+    notice('模板已删除，已套用订阅不受影响');
+  } catch(error) { notice(error.message); }
+}
+
+function trafficBindings(t) {
+  const active = (t.bindings || []).filter(b => b.status === 'active');
+  const history = (t.bindings || []).filter(b => b.status !== 'active');
+  const labels = {active:'有效',detached:'已解绑',revoked:'已撤销',missing:'远端已不存在'};
+  return `<h3>有效绑定节点（${active.length}）</h3><div class="tablewrap"><table><thead><tr><th>专属入站</th><th>服务器 / ID</th><th>状态 / 限速</th><th>操作 / 错误</th></tr></thead><tbody>${active.map(b => `<tr><td>${esc(b.name || '')} : ${b.port}</td><td>${esc(b.serverId)} / ${b.inboundId}</td><td>${b.monthlyPaused ? '月额度暂停' : '有效'} · ${esc((b.multiplierUnits ?? ((t.multiplier ?? 1) * 1000)) / 1000)} 倍<div class="hint">${bandwidthLabel(b.bandwidth)}</div><div class="hint">${b.counterSource === 'authenticated-client' ? '认证用户流量' : b.counterSource === 'pending' ? '等待首次采集' : '入站/端口流量（含连接开销）'} · 本次采集 ${formatBytes(b.lastRawDelta || 0)}${b.lastSampleAt ? ' · '+esc(new Date(b.lastSampleAt * 1000).toLocaleTimeString('zh-CN')) : ''}</div></td><td><button type="button" class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(b.serverId).replace(/'/g,'%27')}',${b.inboundId})">节点带宽限制</button><button type="button" class="btn small" onclick="nodeMultiplierModal('${encodeURIComponent(b.serverId).replace(/'/g,'%27')}',${b.inboundId})">节点流量倍率</button><div class="error">${esc(b.error || '')}</div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">暂无有效绑定节点，请到服务器节点创建或绑定专属入站</td></tr>'}</tbody></table></div>
+  ${history.length ? `<details id="trafficHistory"><summary>失效历史绑定（${history.length}）</summary><p class="hint">这些不是当前有效节点，已停止计量；历史计费用量仍保留。清理记录不会连接服务器或删除远端节点。</p><div class="tablewrap"><table><thead><tr><th>历史节点</th><th>状态</th><th>历史错误</th></tr></thead><tbody>${history.map(b=>`<tr><td>${esc(b.name || '')} : ${b.port}<div class="hint">${esc(b.serverId)} / ${b.inboundId}</div></td><td>${esc(labels[b.status] || b.status)}</td><td>${esc(b.error || '—')}</td></tr>`).join('')}</tbody></table></div><button id="trafficCleanup" class="btn small danger" type="button">清理失效历史绑定</button></details>` : ''}`;
+}
+
 function traffic() {
   const t = S.data.profile?.traffic || {};
   let unit = 1024 ** 3;
   const localDate = t.expire ? new Date(t.expire * 1000) : null;
   const dateValue = localDate ? new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000).toISOString().slice(0, 19) : '';
   $('content').innerHTML = trafficSummary() + `<section class="panel">
-    <div class="panel-head"><h3>订阅套餐模板</h3><span class="pill">一年有效 · 每月重置</span></div>
-    <p class="muted">为当前订阅选择套餐，原订阅链接保持不变。价格仅作管理备注，不会自动收款。流量沿用系统 GiB 单位，所有档位无限速、节点倍率 1 倍。</p>
-    <div class="profile-grid">${(t.plans || []).map(p => `<article class="profile-card ${p.id === t.planId ? 'is-current' : ''}"><div class="profile-card-head"><h4>${esc(p.name)}</h4><span class="pill">${p.price == null ? '价格未设置' : '¥' + esc(p.price) + ' / 年'}</span></div><p><strong>${esc(p.monthlyGiB)} GiB / 月</strong></p><div class="hint">有效期一年 · 无限速 · 节点倍率 1</div>${p.id === t.planId ? '<div class="hint">当前已套用</div>' : ''}</article>`).join('')}</div>
-    <div class="toolbar"><select id="trafficPlan" aria-label="订阅套餐模板"><option value="">请选择套餐模板</option>${(t.plans || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.monthlyGiB)} GiB / 月${p.price == null ? ' · 价格未设置' : ' · ¥' + esc(p.price) + '/年'}</option>`).join('')}</select><button id="trafficPlanApply" type="button" class="btn primary">套用到当前订阅</button></div>
-    <p class="hint">首次套用从当前时间起一年，按开通日（UTC）每月重置；月底日期自动取当月最后一天。再次套用保留到期日、重置日和已用量，不自动续期或清零。将所有绑定节点倍率改为 1 并取消已设置的节点限速；此操作需连接相关服务器，普通保存不受影响。</p>
+    <div class="panel-head"><h3>订阅套餐模板</h3><button type="button" class="btn" onclick="subscriptionPlanModal()">新建模板</button></div>
+    <p class="muted">模板可自定义名称、价格、额度、有效期、重置周期、节点限速与倍率。修改模板不会自动修改已套用的订阅，订阅链接保持不变。</p>
+    <div class="profile-grid">${(t.plans || []).map(p => { const id=encodeURIComponent(p.id).replace(/'/g,'%27');return `<article class="profile-card ${p.id === t.planId ? 'is-current' : ''}"><div class="profile-card-head"><h4>${esc(p.name)}</h4><span class="pill">${p.price == null ? '价格未设置' : '¥' + esc(p.price) + ' / ' + (p.durationMonths ?? 12) + '个月'}</span></div><p><strong>${esc(p.monthlyGiB)} GiB${p.resetPeriod === 'none' ? ' 总额' : ' / 月'}</strong></p><div class="hint">${esc(planDescription(p))}</div>${p.id === t.planId ? '<div class="hint">当前已套用（修改后需重新套用）</div>' : ''}<div class="toolbar"><button type="button" class="btn small" onclick="subscriptionPlanModal('${id}')">编辑模板</button><button type="button" class="btn small danger" onclick="deleteSubscriptionPlan('${id}')">删除模板</button></div></article>`;}).join('')}</div>
+    <div class="toolbar"><select id="trafficPlan" aria-label="订阅套餐模板"><option value="">请选择套餐模板</option>${(t.plans || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.monthlyGiB)} GiB${p.resetPeriod === 'none' ? ' 总额' : '/月'}${p.price == null ? ' · 价格未设置' : ' · ¥' + esc(p.price)}</option>`).join('')}</select><button id="trafficPlanApply" type="button" class="btn primary">套用到当前订阅</button></div>
+    <p class="hint">首次套用按模板月数计算有效期；月套餐按开通日（UTC）重置，月底日期取当月最后一天。再次套用保留到期日和已用量，不自动续期或清零。模板限速和倍率应用到当前绑定节点，并由后续新建节点继承；连接服务器失败请核对已成功下发的节点后重试。</p>
     ${t.planId ? `<p class="hint">当前：${esc(t.planName)} · ${t.price == null ? '价格未设置' : '价格 ¥' + esc(t.price)}${t.nextResetAt ? ' · 下次重置 ' + esc(new Date(t.nextResetAt * 1000).toLocaleString('zh-CN')) : ''}</p>` : ''}
     <div id="trafficPlanError" class="error" role="alert"></div>
     </section><section class="panel">
@@ -2710,7 +2765,7 @@ function traffic() {
       <div><label for="trafficDownload">已用下载计费流量</label><input id="trafficDownload" type="number" min="0" step="any" required value="${(t.download || 0) / unit}"></div>
       <div class="span2"><label for="trafficExpire">到期时间（当前设备本地时间）</label><input id="trafficExpire" type="datetime-local" step="1" value="${dateValue}"><p class="hint">留空表示长期有效；已用流量为上传与下载之和。客户端是否显示额度取决于其版本。</p></div>
     </div><label class="inlinecheck"><input id="trafficEnforce" type="checkbox" ${t.enforce || !t.configured ? 'checked' : ''}>启用服务器强制限制（月额用尽暂停，到期删除专属入站）</label><p class="hint">仅套用套餐不自动开启强制计量，请先绑定专属节点，再勾选此项保存。独立 Xray / sing-box 启用计量前需在远端安装 nftables。计量包含网络协议开销；阈值存在巡检延迟，离线服务器的暂停、恢复、撤销会持续重试。请勿把其他用户共用入站绑定到此订阅。</p><div class="toolbar"><button id="trafficSync" class="btn" type="button">立即同步用量 / 重试撤销</button></div>
-    <div class="tablewrap"><table><thead><tr><th>专属入站</th><th>服务器 / ID</th><th>状态 / 限速</th><th>操作 / 错误</th></tr></thead><tbody>${(t.bindings || []).map(b => `<tr><td>${esc(b.name || '')} : ${b.port}</td><td>${esc(b.serverId)} / ${b.inboundId}</td><td>${esc(b.status)} · ${esc((b.multiplierUnits ?? ((t.multiplier ?? 1) * 1000)) / 1000)} 倍<div class="hint">${bandwidthLabel(b.bandwidth)}</div><div class="hint">${b.counterSource === 'authenticated-client' ? '认证用户流量' : b.counterSource === 'pending' ? '等待首次采集' : '入站/端口流量（含连接开销）'} · 本次采集 ${formatBytes(b.lastRawDelta || 0)}${b.lastSampleAt ? ' · '+esc(new Date(b.lastSampleAt * 1000).toLocaleTimeString('zh-CN')) : ''}</div></td><td><button type="button" class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(b.serverId).replace(/'/g,'%27')}',${b.inboundId})" ${b.status !== 'active' ? 'disabled' : ''}>节点带宽限制</button><button type="button" class="btn small" onclick="nodeMultiplierModal('${encodeURIComponent(b.serverId).replace(/'/g,'%27')}',${b.inboundId})" ${b.status !== 'active' ? 'disabled' : ''}>节点流量倍率</button><div class="error">${esc(b.error || '')}</div></td></tr>`).join('') || '<tr><td colspan="4" class="empty">尚未绑定服务器入站，请到服务器节点创建或绑定专属入站</td></tr>'}</tbody></table></div>${t.enforcementError ? `<p class="error">${esc(t.enforcementError)}</p>` : ''}
+    ${trafficBindings(t)}${t.enforcementError && (t.bindings || []).some(b=>b.status==='active') ? `<p class="error">${esc(t.enforcementError)}</p>` : ''}
     <div id="trafficError" class="error" role="alert"></div><div class="toolbar">
       <button id="trafficSave" class="btn primary" type="submit">保存并同步订阅信息</button>
       <button id="trafficDisable" class="btn" type="button" ${!t.configured ? 'disabled' : ''}>关闭限制与信息展示</button>
@@ -2719,7 +2774,8 @@ function traffic() {
   $('trafficPlanApply').onclick = async () => {
     const planId = $('trafficPlan').value;
     if (!planId) { $('trafficPlanError').textContent = '请先选择套餐模板'; return; }
-    if (!confirm('将套餐套用到当前订阅？保留已用量，绑定节点统一改为 1 倍并取消限速。首次套用有效期为一年，再次套用不自动续期。')) return;
+    const plan = (t.plans || []).find(p=>p.id===planId);
+    if (!plan || !confirm(`将“${plan.name}”套用到当前订阅？${planDescription(plan)}。保留已用量，再次套用不自动续期。`)) return;
     const profile = S.profile, button = $('trafficPlanApply');
     $('trafficSave').disabled = $('trafficDisable').disabled = true;
     button.disabled = true; button.textContent = '正在结算并套用…';
@@ -2740,6 +2796,18 @@ function traffic() {
         $('trafficSave').disabled = false; $('trafficDisable').disabled = !S.data?.profile?.traffic?.configured;
       }
     }
+  };
+  if ($('trafficCleanup')) $('trafficCleanup').onclick = async () => {
+    if (!confirm('只清理当前订阅已解绑、已撤销和远端缺失的历史绑定？已计费用量保留，不删除任何远端节点。')) return;
+    const profile = S.profile, button=$('trafficCleanup');button.disabled=true;
+    try {
+      const result=await api('/traffic/bindings/cleanup',jsonOpt('PUT',{confirmed:true}));
+      if(S.profile!==profile)return;
+      S.data.profile.traffic=result.traffic;
+      if(S.page==='traffic')traffic();
+      notice(`已清理 ${result.removed} 条失效历史绑定，计费用量保留`);
+    }catch(error){if($('trafficError'))$('trafficError').textContent=error.message;}
+    finally{button.disabled=false;}
   };
   $('trafficSync').onclick = async () => {
     $('trafficSync').disabled = true;

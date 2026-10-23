@@ -15,6 +15,81 @@ class SubscriptionPlanTests(unittest.TestCase):
     setUp = fixture.EnforcementTests.setUp
     configure = fixture.EnforcementTests.configure
 
+    def custom_plan(self, **changes):
+        payload = dict(name='自定义套餐', price=88.5, monthlyGiB=25.5, durationMonths=3,
+                       resetPeriod='monthly', speedMbps=10, multiplier=1.5)
+        payload.update(changes)
+        return server.save_subscription_plan(payload)
+
+    def test_custom_template_crud_persists_without_changing_applied_subscription(self):
+        plan = self.custom_plan(speedMbps=0)
+        server.apply_subscription_plan({'planId': plan['id']})
+        record = server.profile_record()
+        original = copy.deepcopy(record['traffic'])
+        edited = self.custom_plan(id=plan['id'], name='已编辑', monthlyGiB=99)
+        self.assertEqual(edited['id'], plan['id'])
+        self.assertEqual(record['traffic'], original)
+        server.PROFILES_CACHE = None
+        self.assertEqual(next(p for p in server.subscription_plans() if p['id'] == plan['id'])['name'], '已编辑')
+        server.delete_subscription_plan({'id': plan['id']})
+        self.assertFalse(any(p['id'] == plan['id'] for p in server.subscription_plans()))
+        self.assertEqual(server.profile_record()['traffic'], original)
+        self.assertEqual(server.traffic_info(record)['total'], round(25.5 * 1024 ** 3))
+
+    def test_builtin_edit_delete_and_empty_list_does_not_reseed(self):
+        self.custom_plan(id='tier-1', name='自定义档位1')
+        self.assertEqual(server.subscription_plans()[0]['name'], '自定义档位1')
+        for p in server.subscription_plans():
+            server.delete_subscription_plan({'id': p['id']})
+        server.PROFILES_CACHE = None
+        self.assertEqual(server.subscription_plans(), [])
+        self.assertTrue(self.custom_plan()['id'].startswith('plan-'))
+
+    def test_invalid_custom_values_never_persist(self):
+        for changes in ({'monthlyGiB':float('nan')}, {'monthlyGiB':True}, {'price':-1},
+                        {'durationMonths':1.5}, {'durationMonths':121}, {'speedMbps':0.01},
+                        {'speedMbps':-1}, {'multiplier':101}, {'resetPeriod':'daily'},
+                        {'name':''}, {'id':'unknown'}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.custom_plan(**changes)
+        self.assertEqual(len(server.subscription_plans()), 3)
+
+    def test_custom_duration_once_quota_speed_and_multiplier_apply(self):
+        plan = self.custom_plan(resetPeriod='none')
+        record = self.configure(total=10000)
+        row = self.manager.inbounds.return_value['inbounds'][0]
+        row.update(protocol='shadowsocks', settings={'method':'aes-128-gcm','password':'owned'})
+        self.manager.set_bandwidth.return_value = {'uploadKbps':10000,'downloadKbps':10000}
+        now = stamp('2026-10-23T08:00:00')
+        with patch('server.time.time', return_value=now):
+            result = server.apply_subscription_plan({'planId':plan['id']})
+        self.assertEqual(result['expire'], stamp('2027-01-23T08:00:00'))
+        self.assertEqual(result['resetPeriod'], 'none')
+        self.assertIsNone(result['nextResetAt'])
+        self.assertEqual(result['multiplier'], 1.5)
+        self.assertEqual(record['remoteNodes'][0]['multiplierUnits'], 1500)
+        self.manager.set_bandwidth.assert_called_once_with('server-a',1,10000,10000)
+        binding = {'serverId':'server-a','inboundId':2}
+        server.inherit_plan_binding(record,binding)
+        self.assertEqual(binding['multiplierUnits'],1500)
+        self.manager.set_bandwidth.assert_called_with('server-a',2,10000,10000)
+
+    def test_history_cleanup_is_local_scoped_and_preserves_bills_and_active_nodes(self):
+        record = self.configure()
+        record['traffic'].update(upload=300, download=400)
+        active = copy.deepcopy(record['remoteNodes'][0])
+        for state in ('detached','revoked','missing'):
+            record['remoteNodes'].append({**active,'status':state})
+        record['remoteNodes'].append({**active,'status':'unknown'})
+        original = copy.deepcopy(record['traffic'])
+        with self.assertRaisesRegex(ValueError,'请确认'):
+            server.cleanup_traffic_bindings({})
+        result = server.cleanup_traffic_bindings({'confirmed':True})
+        self.assertEqual(result['removed'],3)
+        self.assertEqual(record['remoteNodes'],[active,{**active,'status':'unknown'}])
+        self.assertEqual(record['traffic'],original)
+        self.assertEqual(self.manager.mock_calls,[])
+
     def test_three_templates_and_unpriced_third_tier(self):
         for plan, amount, price in zip(server.SUBSCRIPTION_PLANS, (50, 100, 150), (120, 240, None)):
             with self.subTest(plan=plan['id']):
