@@ -1847,15 +1847,8 @@ def get_cached_config(path):
     doc = yaml_load(text)
     if not isinstance(doc, dict):
         raise ValueError("配置文件不是有效的 YAML 对象")
-    # New Xray REALITY servers require the hybrid key share; keep old profiles usable.
-    changed = False
-    for node in doc.get("proxies", []) or []:
-        reality = node.get("reality-opts")
-        if isinstance(reality, dict) and reality and "support-x25519mlkem768" not in reality:
-            reality["support-x25519mlkem768"] = True
-            changed = True
-    if changed:
-        text = yaml_dump(doc)
+    # A subscription read must preserve imported transport/handshake choices.
+    # Controller-created nodes carry explicit compatibility options in their links.
 
     with CONFIG_CACHE_LOCK:
         cache_config_entry(key, {
@@ -2031,10 +2024,13 @@ def bool_value(value, default=False):
 
 def normalize_reality_options(node):
     options = node.get("reality-opts")
-    if not isinstance(options, dict) or "short-id" not in options:
+    if not isinstance(options, dict):
         return node
     options = dict(options)
-    options.setdefault("support-x25519mlkem768", True)
+    if "support-x25519mlkem768" in options and type(options["support-x25519mlkem768"]) is not bool:
+        raise ValueError("Reality 混合密钥握手选项必须为布尔值")
+    if "short-id" not in options:
+        return node
     raw = options.get("short-id")
     short_id = "" if raw is None else str(raw).strip()
     if not short_id or short_id.lower() in ("null", "none"):
@@ -2241,6 +2237,11 @@ def parse_node_link(link):
             config["reality-opts"] = {"public-key": public_key}
             if short_id:
                 config["reality-opts"]["short-id"] = short_id
+            hybrid = first(query, "support-x25519mlkem768")
+            if hybrid:
+                if hybrid.lower() not in ("true", "false", "1", "0"):
+                    raise ValueError("Reality 混合密钥握手选项须为 true 或 false")
+                config["reality-opts"]["support-x25519mlkem768"] = hybrid.lower() in ("true", "1")
     elif scheme == "tuic":
         config.update({"uuid": username, "password": password or first(query, "password"),
                        "congestion-controller": first(query, "congestion_control", "congestion-controller", default="bbr"),
@@ -2585,6 +2586,11 @@ def node_to_uri(node):
         if reality:
             query["pbk"] = reality.get("public-key", "")
             query["sid"] = reality.get("short-id", "")
+            if "support-x25519mlkem768" in reality:
+                flag = reality["support-x25519mlkem768"]
+                if type(flag) is not bool:
+                    raise ValueError("Reality 混合密钥握手选项必须为布尔值")
+                query["support-x25519mlkem768"] = "true" if flag else "false"
         add_transport_query(node, query)
         return f"vless://{quote(str(node.get('uuid', '')), safe='')}@{address}?{urlencode(query)}#{name}"
     if node_type == "tuic":

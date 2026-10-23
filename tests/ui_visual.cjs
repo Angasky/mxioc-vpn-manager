@@ -43,6 +43,8 @@ try{
   if(theme==='pink')assert.equal(style.body,'rgb(251, 247, 244)');
   await page.evaluate(()=>nodeModal(0));
   await page.screenshot({path:`${captureDir}/${theme}-node.png`,fullPage:true});
+  assert.equal(await page.$eval('#nRealityHybrid',n=>n.value),'');
+  await page.select('#nRealityHybrid','false');
   assert(await page.$('#nodePreview'));await page.evaluate(async()=>{await document.getElementById('nodePreview').onclick();});assert(await page.$('#nodePreviewResult:not(.hidden)'));await page.evaluate(()=>closeModal());
  }
  for (const theme of ['high','low','pink']) {
@@ -136,13 +138,13 @@ try{
    setTheme(theme);S.data.profile.traffic={configured:true,enforce:true,upload:1024,download:2048,total:10737418240,used:3072,remaining:10737415168,percent:0,multiplier:2,rawUsed:1536,bindings:[{serverId:'demo',inboundId:1,port:24443,name:'订阅专属节点',status:'active',bandwidth:{uploadKbps:1000,downloadKbps:2000}}]};
    await go('traffic');nodeBandwidthModal('demo',1);
   },theme);
-  assert.equal(await page.$eval('#trafficMultiplier',n=>n.value),'2');
+  assert.equal(await page.$eval('#trafficTotal',n=>n.value),'10');
   assert.equal(await page.$eval('#bandwidthUpload',n=>n.value),'1');
   assert.equal(await page.$eval('#bandwidthDownload',n=>n.value),'2');
   await page.screenshot({path:path.join(captureDir,theme+'-node-bandwidth.png'),fullPage:true});
   await page.evaluate(()=>closeModal());
  }
- console.log('PASS: subscription multiplier and per-node bandwidth dialog in all three themes');
+ console.log('PASS: subscription quota and per-node bandwidth dialog in all three themes');
  await page.setViewport({width:390,height:844,deviceScaleFactor:1});
  for (const theme of ['high','low','pink']) {
   await page.evaluate(async theme=>{setTheme(theme);await go('monitoring');},theme);

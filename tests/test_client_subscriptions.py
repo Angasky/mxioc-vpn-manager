@@ -77,10 +77,11 @@ class ClientSubscriptionTests(unittest.TestCase):
             self.assertEqual(entries[3]['name'],self.nodes[0]['name'])
         self.assertEqual(client_adapter.usage_nodes({'configured':False}),[])
 
-    def test_clash_export_enables_hybrid_reality_keyshare(self):
+    def test_clash_export_preserves_imported_reality_keyshare(self):
+        original = server.FILES[0].read_text()
         doc,text=server.get_cached_config(server.FILES[0])
-        self.assertIs(doc['proxies'][0]['reality-opts']['support-x25519mlkem768'],True)
-        self.assertIn('support-x25519mlkem768: true',text)
+        self.assertNotIn('support-x25519mlkem768',doc['proxies'][0]['reality-opts'])
+        self.assertEqual(text, original)
 
     def test_shadowrocket_paired_names_match_exactly_without_direct_or_unknown_members(self):
         body,_=server.converted_subscription('clash','shadowrocket-ha')

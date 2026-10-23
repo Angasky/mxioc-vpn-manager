@@ -2,11 +2,11 @@
 const {JSDOM} = require('jsdom');
 const fs=require('fs'),assert=require('assert');
 const html=fs.readFileSync(require('path').resolve(__dirname, '..', 'index.html'),'utf8');
-const dom=new JSDOM(html,{url:'https://vpn.mxvv.cn/admin/',runScripts:'outside-only'});
+const dom=new JSDOM(html,{url:'https://vpn.mxvv.cn/admin/',runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window;
 w.alert=()=>{}; w.confirm=()=>true; w.matchMedia=()=>({matches:false});
 const script=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]).join('\n').replace('void bootstrap();','');
-w.eval(script+'\nwindow.testUI={S,traffic,nodeMultiplierModal,nodeBandwidthModal,bandwidthLabel,chainModal,chains,failoverModal,conversionRows,profileClientLinks,nativeApi:api,chooseNodeServer,remoteNodeLinks,renderRemoteNodes,serverForm,remoteNodeForm,renderServers,sniCandidates,setApi:fn=>api=fn};');
+w.eval(script+'\nwindow.testUI={S,traffic,nodeModal,readNodeForm,setTheme,nodeMultiplierModal,nodeBandwidthModal,bandwidthLabel,chainModal,chains,failoverModal,conversionRows,profileClientLinks,nativeApi:api,chooseNodeServer,remoteNodeLinks,renderRemoteNodes,serverForm,remoteNodeForm,renderServers,sniCandidates,setApi:fn=>api=fn};');
 const t=w.testUI,$=id=>w.document.getElementById(id);
 t.S.data={nodes:[{index:0,name:'entry',server:'198.51.100.1',config:{type:'ss',server:'198.51.100.1',port:443}},{index:1,name:'exit',server:'198.51.100.2',config:{type:'ss',server:'198.51.100.2',port:443}}],groups:[],rules:[],profile:{name:'test',traffic:{configured:false,bindings:[{name:'owned',port:443,serverId:'s',inboundId:1,status:'active'}]}}};
 t.S.servers=[{id:'native',name:'sing',host:'198.51.100.1',sshPort:22,sshUser:'root',installType:'sing-box',fingerprint:'SHA256:'+'a'.repeat(43)}];
@@ -101,6 +101,24 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
  assert.equal(bwRequest[1].headers['X-Profile'],'clash');assert.deepEqual(JSON.parse(bwRequest[1].body),{serverId:'s',inboundId:1,uploadMbps:1.5,downloadMbps:2});
  t.nodeBandwidthModal('s',1);await $('bandwidthClear').onclick();
  assert.equal(JSON.parse(requests.filter(r=>r[0]==='/servers/bandwidth').pop()[1].body).downloadMbps,null);
+ const previousNodes=t.S.data.nodes;
+ for(const theme of ['high','low','pink']) {
+  t.setTheme(theme);
+  for(const flag of [undefined,false,true]) {
+   const reality={'public-key':'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA','short-id':'abcd','mldsa65-verify':'preserve-advanced-option'};
+   if(flag!==undefined)reality['support-x25519mlkem768']=flag;
+   const config={name:'manual',type:'vless',server:'example.com',port:443,uuid:'22453845-ff1a-471d-8214-25952a9348a6',tls:true,'client-fingerprint':'chrome','reality-opts':reality};
+   t.S.data.nodes=[{index:0,name:'manual',config}];t.nodeModal(0);
+   assert.equal($('nRealityHybrid').value,flag===undefined?'':String(flag));
+   const saved=t.readNodeForm();assert.equal(saved['reality-opts']['support-x25519mlkem768'],flag);
+   assert.equal(saved['reality-opts']['mldsa65-verify'],'preserve-advanced-option');
+   $('nRealityHybrid').value='false';assert.equal(t.readNodeForm()['reality-opts']['support-x25519mlkem768'],false);
+   $('nRealityHybrid').value='';assert(!Object.hasOwn(t.readNodeForm()['reality-opts'],'support-x25519mlkem768'));
+   assert.equal(reality['support-x25519mlkem768'],flag,'editor must not mutate source');
+  }
+ }
+ t.S.data.nodes=previousNodes;
+ console.log('PASS: Reality handshake mode and advanced options survive edits in all themes');
  console.log('PASS: traffic multiplier submission and subscription-owned node bandwidth apply/clear');
  console.log('PASS: quota binding form, native/panel selection, native node controls, server-chain submission/escaping, TUIC template submission, batched SNI selection');
  dom.window.close();

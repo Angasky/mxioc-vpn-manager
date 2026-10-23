@@ -3757,6 +3757,7 @@ function protocolFields(type, cfg = {}) {
       <div><label>客户端指纹</label><select id="nFingerprint">${options(['chrome', 'firefox', 'safari', 'edge', 'random', ''], cfg['client-fingerprint'] || 'chrome')}</select></div>
       <div><label>Reality 公钥 PBK</label><input id="nPbk" value="${esc(ro['public-key'] || '')}"></div>
       <div><label>Reality Short ID</label><input id="nSid" value="${esc(ro['short-id'] || '')}"></div>
+      <div class="span2"><label for="nRealityHybrid">Reality 混合密钥握手（Mihomo）</label><select id="nRealityHybrid"><option value="" ${ro['support-x25519mlkem768'] == null ? 'selected' : ''}>沿用客户端默认</option><option value="true" ${ro['support-x25519mlkem768'] === true ? 'selected' : ''}>启用混合密钥握手</option><option value="false" ${ro['support-x25519mlkem768'] === false ? 'selected' : ''}>关闭混合密钥握手</option></select><p class="hint">留空沿用客户端默认；true 显式启用 X25519MLKEM768，false 显式关闭。手动导入保留原配置，总控新建节点保留兼容选项。不同服务端版本需求不同，修改前请对照原始配置。</p></div>
       <div class="span2 inlinecheck"><input id="nTls" type="checkbox" ${cfg.tls !== false ? 'checked' : ''}><span>启用 TLS / Reality 安全连接</span></div>
       <div class="span2 inlinecheck"><input id="nSkip" type="checkbox" ${cfg['skip-cert-verify'] ? 'checked' : ''}><span>跳过服务端证书验证 (skip-cert-verify)</span></div>
     </div>
@@ -3907,7 +3908,11 @@ function readNodeForm() {
     if (val('nPacket')) cfg['packet-encoding'] = val('nPacket'); else delete cfg['packet-encoding'];
     if (val('nSni')) cfg.servername = val('nSni'); else delete cfg.servername;
     if (val('nFingerprint')) cfg['client-fingerprint'] = val('nFingerprint');
-    if (val('nPbk')) cfg['reality-opts'] = { 'public-key': val('nPbk'), 'short-id': val('nSid') }; else delete cfg['reality-opts'];
+    if (val('nPbk')) {
+      cfg['reality-opts'] = { ...(cfg['reality-opts'] || {}), 'public-key': val('nPbk'), 'short-id': val('nSid') };
+      if (val('nRealityHybrid') === '') delete cfg['reality-opts']['support-x25519mlkem768'];
+      else cfg['reality-opts']['support-x25519mlkem768'] = val('nRealityHybrid') === 'true';
+    } else delete cfg['reality-opts'];
     if (on('nSkip')) cfg['skip-cert-verify'] = true; else delete cfg['skip-cert-verify'];
   } else if (type === 'tuic') {
     Object.assign(cfg, {
