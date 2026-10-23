@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import calendar
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from http.cookies import SimpleCookie
@@ -507,6 +508,79 @@ def public_profile(record):
             "url": "/sub/" + quote(slug, safe=""), "traffic": traffic_info(record)}
 
 
+SUBSCRIPTION_PLANS = (
+    {"id": "tier-1", "name": "档位1", "price": 120, "monthlyGiB": 50},
+    {"id": "tier-2", "name": "档位2", "price": 240, "monthlyGiB": 100},
+    {"id": "tier-3", "name": "档位3", "price": None, "monthlyGiB": 150},
+)
+
+
+def plan_month(anchor, months):
+    """Calendar anniversaries in UTC, clamped without drifting after February."""
+    from datetime import timezone
+    date = datetime.fromtimestamp(anchor, timezone.utc)
+    year, month = divmod(date.year * 12 + date.month - 1 + months, 12)
+    return int(date.replace(year=year, month=month + 1,
+                            day=min(date.day, calendar.monthrange(year, month + 1)[1])).timestamp())
+
+
+def reset_monthly_traffic(record, now=None):
+    stored = record.get("traffic") or {}
+    now = int(time.time()) if now is None else now
+    anchor, next_reset = stored.get("cycleAnchor"), stored.get("nextResetAt")
+    if (stored.get("resetPeriod") != "monthly" or not anchor or not next_reset
+            or now < next_reset or (stored.get("expire") and now >= stored["expire"])):
+        return False
+    month = 1
+    while plan_month(anchor, month) <= now:
+        month += 1
+    stored.update(upload=0, download=0, rawUpload=0, rawDownload=0,
+                  nextResetAt=plan_month(anchor, month), updatedAt=now)
+    for binding in record.get("remoteNodes", []):
+        binding.update(monthlyBaselinePending=True, uploadRemainder=0, downloadRemainder=0)
+    return True
+
+
+def apply_subscription_plan(payload):
+    plan = next((p for p in SUBSCRIPTION_PLANS if p["id"] == payload.get("planId")), None)
+    if plan is None:
+        raise ValueError("请选择有效的套餐模板")
+    with ENFORCEMENT_LOCK:
+        record = profile_record()
+        if record.get("accessRevoked"):
+            raise ValueError("该订阅节点已撤销，请先续期并重新创建节点，再套用套餐")
+        if (record.get("traffic") or {}).get("enforce"):
+            if not enforce_profile(record["id"], revoke=False):
+                raise ValueError("原用量结算失败，套餐未套用，请恢复服务器连接后重试")
+        # Remote operations are explicit here, never hidden in ordinary quota saves.
+        for binding in record.get("remoteNodes", []):
+            if binding.get("status") != "active":
+                continue
+            value = binding.get("bandwidth") or {}
+            if value.get("uploadKbps") or value.get("downloadKbps"):
+                result = remote_manager().set_bandwidth(binding["serverId"], binding["inboundId"], 0, 0)
+                with LOCK:
+                    binding["bandwidth"] = result
+                    save_profiles(load_profiles())
+        now = int(time.time())
+        previous = record.get("traffic") or {}
+        # Reapplying/changing a tier never renews the year or the monthly anchor.
+        anchor = previous.get("cycleAnchor", now)
+        update_traffic({"enabled": True, "enforce": bool(previous.get("enforce")),
+                                 "preserveUsage": True, "multiplier": 1,
+                                 "total": plan["monthlyGiB"] * 1024 ** 3,
+                                 "expire": previous.get("expire") if previous.get("planId") else plan_month(now, 12)})
+        with LOCK:
+            record["traffic"].update(planId=plan["id"], planName=plan["name"], price=plan["price"],
+                                     resetPeriod="monthly", cycleAnchor=anchor,
+                                     nextResetAt=previous.get("nextResetAt", plan_month(anchor, 1)))
+            for binding in record.get("remoteNodes", []):
+                binding["multiplierUnits"] = 1000
+            save_profiles(load_profiles())
+            ENFORCEMENT_WAKE.set()
+            return traffic_info(record)
+
+
 def traffic_info(record):
     with LOCK:
         return _traffic_info(record)
@@ -515,14 +589,16 @@ def traffic_info(record):
 def _traffic_info(record):
     stored = record.get("traffic") or {}
     if not stored.get("enabled"):
-        return {"configured": False, "bindings": copy.deepcopy(record.get("remoteNodes", [])),
+        return {"configured": False, "plans": copy.deepcopy(list(SUBSCRIPTION_PLANS)), "bindings": copy.deepcopy(record.get("remoteNodes", [])),
                 "enforcementError": record.get("enforcementError", "")}
     upload = stored.get("upload", 0)
     download = stored.get("download", 0)
     total = stored.get("total")
     expire = stored.get("expire")
     used = upload + download
-    return {"configured": True, "upload": upload, "download": download,
+    return {"configured": True, "plans": copy.deepcopy(list(SUBSCRIPTION_PLANS)),
+            **{key: stored.get(key) for key in ("planId", "planName", "price", "resetPeriod", "nextResetAt")},
+            "upload": upload, "download": download,
             "total": total, "expire": expire, "used": used,
             "multiplier": stored.get("multiplierUnits", 1000) / 1000,
             "rawUpload": stored.get("rawUpload", 0), "rawDownload": stored.get("rawDownload", 0),
@@ -589,6 +665,9 @@ def update_traffic(payload):
 
 def validate_traffic_update(payload, record):
     """Validate a complete edit before sampling or provisioning remote counters."""
+    if (any(b.get("monthlyPaused") for b in record.get("remoteNodes", []))
+            and (payload.get("enabled") is False or payload.get("enforce") is False)):
+        raise ValueError("月额度暂停的节点尚未恢复，请先增加额度并同步恢复后再关闭限制")
     if payload.get("enabled") is False:
         if record.get("accessRevoked"):
             raise ValueError("节点已撤销，请先续期/调整额度并重新创建专属节点")
@@ -616,7 +695,8 @@ def validate_traffic_update(payload, record):
     from bandwidth import multiplier_units
     previous = record.get("traffic") or {}
     units = multiplier_units(payload.get("multiplier", previous.get("multiplierUnits", 1000) / 1000))
-    return {"enabled": True, **values, "enforce": enforce, "updatedAt": int(time.time()),
+    return {**{key: previous[key] for key in ("planId", "planName", "price", "resetPeriod", "cycleAnchor", "nextResetAt") if key in previous},
+            "enabled": True, **values, "enforce": enforce, "updatedAt": int(time.time()),
             "multiplierUnits": units, "rawUpload": previous.get("rawUpload", 0),
             "rawDownload": previous.get("rawDownload", 0)}
 
@@ -858,6 +938,26 @@ def set_node_multiplier(payload):
         return {"serverId": server_id, "inboundId": inbound_id, "multiplier": units / 1000}
 
 
+def sync_monthly_pause(manager, record, binding, row):
+    pause = traffic_info(record).get("exhausted", False)
+    if not pause and not binding.get("monthlyPaused"):
+        return
+    with LOCK:
+        if pause and not binding.get("monthlyPaused"):
+            if row.get("enable", True) is False:
+                raise ValueError("入站已被手动停用，不接管自动恢复")
+            binding["monthlyPaused"] = True
+            save_profiles(load_profiles())
+    if row.get("enable", True) != (not pause):
+        manager.update_inbound(binding["serverId"], binding["inboundId"], {**row, "enable": not pause})
+    if pause:
+        manager.disconnect_port(binding["serverId"], binding["port"])
+    else:
+        with LOCK:
+            binding.pop("monthlyPaused", None)
+            save_profiles(load_profiles())
+
+
 def enforce_profile(profile_id, revoke=True, only_binding=None):
     """Accumulate deltas and retry remote revocation, including after restart.
 
@@ -867,6 +967,8 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
     with ENFORCEMENT_LOCK:
         with LOCK:
             record = profile_record(profile_id)
+            if reset_monthly_traffic(record):
+                save_profiles(load_profiles())
             bindings = [b for b in record.get("remoteNodes", []) if b.get("status") == "active"]
             if only_binding is not None:
                 bindings = [b for b in bindings if (b["serverId"], b["inboundId"]) == only_binding]
@@ -888,6 +990,16 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
             if rows is None:
                 continue
             row = rows.get(binding["inboundId"])
+            if (row is not None and (not binding.get("identityHash") or binding["identityHash"] == remote_node_identity(row))
+                    and (record.get("traffic") or {}).get("resetPeriod") == "monthly"
+                    and not traffic_info(record).get("expired")):
+                try:
+                    sync_monthly_pause(manager, record, binding, row)
+                except Exception as exc:
+                    with LOCK:
+                        binding["error"] = str(exc)[:300]
+                    errors.append(str(exc)[:300])
+                    continue
             cleanup_error = ""
             if row is None and binding.get("bandwidth") and (binding["bandwidth"].get("uploadKbps") or binding["bandwidth"].get("downloadKbps")):
                 try:
@@ -921,6 +1033,14 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                 current['error'] = ''
                 current['lastSampleAt'] = int(time.time())
                 current['lastRawDelta'] = 0
+                if current.pop("monthlyBaselinePending", False):
+                    if any(type(reading[k]) is not int or reading[k] < 0 for k in ("up", "down")):
+                        current["monthlyBaselinePending"] = True
+                        current["error"] = "服务器流量计数无效，跨月基线等待重试"
+                        errors.append(current["error"])
+                        continue
+                    current.update(up=reading['up'], down=reading['down'], counterSource=reading['source'])
+                    continue
                 if old_source not in (reading['source'], 'pending'):
                     # Counter namespaces have different baselines. Switching must
                     # never interpret a lower user total as a reset and bill it again.
@@ -949,7 +1069,9 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                 save_profiles(load_profiles())
                 return not errors
             blocked = subscription_blocked(record)
-            if blocked:
+            monthly_pause = ((record.get("traffic") or {}).get("resetPeriod") == "monthly"
+                             and not traffic_info(record).get("expired"))
+            if blocked and not monthly_pause:
                 # Durable before remote deletion, so a crash cannot re-enable access.
                 record["accessRevoked"] = True
             record["lastEnforcedAt"] = int(time.time())
@@ -960,6 +1082,12 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                     continue
                 try:
                     rows = snapshots.get(binding["serverId"])
+                    if monthly_pause:
+                        row = rows.get(binding["inboundId"]) if rows is not None else None
+                        if row is None:
+                            raise ValueError("月额度用尽，服务器离线或入站缺失，暂停待重试")
+                        sync_monthly_pause(manager, record, binding, row)
+                        continue
                     if rows is None or binding["inboundId"] in rows:
                         manager.delete_inbound(binding["serverId"], binding["inboundId"])
                     if binding.get("bandwidth") and (binding["bandwidth"].get("uploadKbps") or binding["bandwidth"].get("downloadKbps")):
@@ -983,7 +1111,10 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
 
 def enforcement_loop():
     while True:
-        with LOCK:
+        with ENFORCEMENT_LOCK, LOCK:
+            changed = any([reset_monthly_traffic(r) for r in load_profiles()["profiles"]])
+            if changed:
+                save_profiles(load_profiles())
             identities = [r["id"] for r in load_profiles()["profiles"] if (r.get("traffic") or {}).get("enforce")]
         for identity in identities:
             try:
@@ -3475,6 +3606,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True, "node": result, "traffic": traffic_info(profile_record())})
             if path == "/admin/api/traffic":
                 return self.json_out({"ok": True, "traffic": update_traffic(data)})
+            if path == "/admin/api/traffic/plan":
+                return self.json_out({"ok": True, "traffic": apply_subscription_plan(data)})
             if path == "/admin/api/nodes":
                 return self.json_out({"ok": True, **(mutate_node("PUT", data) or {})})
             elif path == "/admin/api/chains": mutate_chain("PUT", data)
