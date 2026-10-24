@@ -70,12 +70,14 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.plans.length),3);
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.used),579);
   await page.evaluate(()=>{
-   S.data.profile.traffic.bindings=['active','detached','revoked','missing'].map((status,i)=>({status,name:'node-'+i,serverId:'s',inboundId:i+1,port:20001+i}));traffic();
+   S.data.profile.traffic.bindings=['active','detached','revoked','missing','identity_changed'].map((status,i)=>({status,name:'node-'+i,serverId:'s',inboundId:i+1,port:20001+i}));traffic();
   });
   assert.equal(await page.$$eval('#trafficForm > .tablewrap tbody tr',els=>els.length),1);
   assert.equal(await page.$eval('#trafficHistory',el=>el.open),false);
-  assert.equal(await page.$$eval('#trafficHistory tbody tr',els=>els.length),3);
+  assert.equal(await page.$$eval('#trafficHistory tbody tr',els=>els.length),4);
   assert.equal(await page.$$eval('#trafficHistory button[onclick*="nodeMultiplier"]',els=>els.length),0);
+  assert(await page.$eval('#trafficHistory',el=>el.textContent.includes('身份已变化（停止管理）')));
+  assert.equal(await page.$$eval('#trafficHistory button[onclick*="nodeBandwidth"]',els=>els.length),0);
   await page.click('#trafficHistory summary');await page.click('#trafficCleanup');
   await page.waitForFunction(()=>!$('trafficHistory'));
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.used),579);

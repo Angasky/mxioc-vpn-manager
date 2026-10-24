@@ -385,8 +385,10 @@ def load_profiles():
         mtime = PROFILES_FILE.stat().st_mtime_ns
         if PROFILES_CACHE is not None and PROFILES_MTIME == mtime:
             data = PROFILES_CACHE
+            loaded_from_disk = False
         else:
             data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+            loaded_from_disk = True
         if not isinstance(data.get("profiles"), list):
             raise ValueError("订阅配置索引损坏")
         migrated = False
@@ -395,6 +397,14 @@ def load_profiles():
                 record["slug"] = unique_slug(data)
                 record["customSlug"] = False
                 migrated = True
+            # Earlier versions stopped destructive actions on reused IDs but
+            # accidentally left their old ownership records marked active.
+            for binding in (record.get("remoteNodes", []) if loaded_from_disk else ()):
+                if (binding.get("status") == "active" and str(binding.get("error") or "").startswith(
+                        "远端入站身份已变化，已停止自动删除")):
+                    binding["status"] = "identity_changed"
+                    binding.setdefault("invalidatedAt", int(time.time()))
+                    migrated = True
         if migrated:
             save_profiles(data)
             return data
@@ -582,8 +592,8 @@ def cleanup_traffic_bindings(payload):
     with ENFORCEMENT_LOCK, LOCK:
         record = profile_record()
         rows = record.get("remoteNodes", [])
-        removed = [b for b in rows if b.get("status") in ("detached", "revoked", "missing")]
-        record["remoteNodes"] = [b for b in rows if b.get("status") not in ("detached", "revoked", "missing")]
+        removed = [b for b in rows if b.get("status") in ("detached", "revoked", "missing", "identity_changed")]
+        record["remoteNodes"] = [b for b in rows if b.get("status") not in ("detached", "revoked", "missing", "identity_changed")]
         record["enforcementError"] = "；".join(dict.fromkeys(b["error"] for b in record["remoteNodes"] if b.get("error")))[:1500]
         save_profiles(load_profiles())
         return {"removed": len(removed), "traffic": traffic_info(record)}
@@ -1118,7 +1128,7 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                     continue
                 if current.get("identityHash") and current["identityHash"] != remote_node_identity(row):
                     message = "远端入站身份已变化，已停止自动删除，避免误删复用 ID 的节点"
-                    current["error"] = message
+                    current.update(status="identity_changed", invalidatedAt=int(time.time()), error=message)
                     errors.append(message)
                     mismatches.add((server_id, binding["inboundId"]))
                     continue
