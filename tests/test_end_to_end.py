@@ -133,6 +133,21 @@ class EndToEndTests(unittest.TestCase):
         server.enforce_profile('clash')  # Background worker processes the saved policy.
         self.assertFalse(self.api.rows); self.assertFalse(self.manager.record(identity)['bandwidths'])
 
+    def test_manual_binding_remove_keeps_remote_inbound_and_subscription_node(self):
+        identity, inbound = self.add_server_and_node()
+        snapshot, _ = self.request('GET','/snapshot')
+        binding = snapshot['profile']['traffic']['bindings'][0]
+        self.manager.connect.reset_mock()
+        result, _ = self.request('PUT','/traffic/bindings/remove', {
+            'recordIndex':binding['recordIndex'],'recordToken':binding['recordToken'],'confirmed':True})
+        self.assertEqual(result['removed'],1)
+        self.assertFalse(result['traffic']['bindings'])
+        self.assertEqual(len(self.api.rows),1)
+        self.assertEqual(self.api.rows[0]['id'],inbound)
+        snapshot, _ = self.request('GET','/snapshot')
+        self.assertEqual(len(snapshot['nodes']),1)
+        self.manager.connect.assert_not_called()
+
     def test_csrf_validation_logout_and_persisted_cookie(self):
         self.request('POST','/profiles',{'name':'bad-origin'},origin='http://untrusted.example',status=403)
         server.SESSIONS = None

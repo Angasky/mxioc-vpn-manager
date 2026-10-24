@@ -15,7 +15,7 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    S.data={nodes:[],groups:[],rules:[],profile:{name:'测试订阅',traffic:{configured:false,bindings:[],plans}}};
    window.calls=[];window.confirm=()=>true;
    api=async(url,options)=>{
-    window.calls.push({url,body:JSON.parse(options.body)});
+    window.calls.push({url,body:JSON.parse(options.body),profile:options.headers?.['X-Profile']});
     if(window.simulateError)throw Error('服务器离线，套餐未套用');
     const body=JSON.parse(options.body);
     if(url==='/traffic/plans'){
@@ -26,6 +26,12 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
     if(url==='/traffic/plans/delete'){
      plans.splice(plans.findIndex(p=>p.id===body.id),1);
      return {traffic:{...S.data.profile.traffic,plans}};
+    }
+    if(url==='/traffic/bindings/remove'){
+     if(window.removeDelay)await new Promise(resolve=>setTimeout(resolve,window.removeDelay));
+     const rows=S.data.profile.traffic.bindings;
+     if(rows[body.recordIndex]?.recordToken!==body.recordToken)throw Error('记录已变更');
+     return {removed:1,traffic:{...S.data.profile.traffic,bindings:rows.filter((_,i)=>i!==body.recordIndex).map((b,i)=>({...b,recordIndex:i}))}};
     }
     if(url==='/traffic/bindings/cleanup')return {removed:3,traffic:{...S.data.profile.traffic,bindings:S.data.profile.traffic.bindings.filter(b=>b.status==='active')}};
     const plan=plans.find(p=>p.id===JSON.parse(options.body).planId);
@@ -70,7 +76,29 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.plans.length),3);
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.used),579);
   await page.evaluate(()=>{
-   S.data.profile.traffic.bindings=['active','detached','revoked','missing','identity_changed'].map((status,i)=>({status,name:'node-'+i,serverId:'s',inboundId:i+1,port:20001+i}));traffic();
+   S.data.profile.traffic.bindings=Array.from({length:3},(_,i)=>({recordIndex:i,recordToken:String(i+1).repeat(64),status:'active',name:'manual-'+i,serverId:'s',inboundId:i+1,port:30001+i}));traffic();
+  });
+  const beforeCancel=await page.evaluate(()=>calls.length);
+  await page.evaluate(()=>window.confirm=()=>false);await page.click('[data-remove-binding="0"]');
+  assert.equal(await page.evaluate(()=>calls.length),beforeCancel);
+  await page.evaluate(()=>window.confirm=()=>true);
+  await page.evaluate(()=>window.removeDelay=100);
+  const removalCount=await page.evaluate(()=>calls.filter(c=>c.url==='/traffic/bindings/remove').length);
+  await page.click('[data-remove-binding="1"]');await page.click('[data-remove-binding="0"]');
+  await page.waitForFunction(()=>S.data.profile.traffic.bindings.length===2);
+  assert.deepEqual(await page.evaluate(()=>S.data.profile.traffic.bindings.map(b=>b.inboundId)),[1,3]);
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.url==='/traffic/bindings/remove').length),removalCount+1);
+  await page.evaluate(()=>window.removeDelay=0);
+  const removal=await page.evaluate(()=>calls.filter(c=>c.url==='/traffic/bindings/remove').at(-1));
+  assert.equal(removal.body.recordIndex,1);assert.equal(removal.body.recordToken,'2'.repeat(64));assert.equal(removal.profile,'clash');
+  assert.equal(await page.evaluate(()=>S.data.profile.traffic.used),579);
+  await page.evaluate(()=>window.simulateError=true);await page.click('[data-remove-binding="0"]');
+  await page.waitForFunction(()=>$('trafficError').textContent.includes('服务器离线'));
+  assert.equal(await page.evaluate(()=>S.data.profile.traffic.bindings.length),2);
+  assert.equal(await page.$eval('[data-remove-binding="0"]',el=>el.disabled),false);
+  await page.evaluate(()=>window.simulateError=false);
+  await page.evaluate(()=>{
+   S.data.profile.traffic.bindings=['active','detached','revoked','missing','identity_changed'].map((status,i)=>({recordIndex:i,recordToken:String(i+1).repeat(64),status,name:'node-'+i,serverId:'s',inboundId:i+1,port:20001+i}));traffic();
   });
   assert.equal(await page.$$eval('#trafficForm > .tablewrap tbody tr',els=>els.length),1);
   assert.equal(await page.$eval('#trafficHistory',el=>el.open),false);
@@ -78,6 +106,9 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   assert.equal(await page.$$eval('#trafficHistory button[onclick*="nodeMultiplier"]',els=>els.length),0);
   assert(await page.$eval('#trafficHistory',el=>el.textContent.includes('身份已变化（停止管理）')));
   assert.equal(await page.$$eval('#trafficHistory button[onclick*="nodeBandwidth"]',els=>els.length),0);
+  await page.click('#trafficHistory summary');await page.click('[data-remove-binding="4"]');
+  await page.waitForFunction(()=>S.data.profile.traffic.bindings.length===4);
+  assert.equal(await page.$$eval('#trafficHistory tbody tr',els=>els.length),3);
   await page.click('#trafficHistory summary');await page.click('#trafficCleanup');
   await page.waitForFunction(()=>!$('trafficHistory'));
   assert.equal(await page.evaluate(()=>S.data.profile.traffic.used),579);
@@ -91,6 +122,6 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   await page.setViewport({width:1440,height:1100});
   await page.screenshot({path:path.resolve(__dirname,'..','work','subscription-plans.png'),fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log('PASS: template CRUD/custom fields/escaping, explicit apply, unchanged URL/usage, errors/retry, collapsed history/local cleanup, desktop/mobile layout');
+  console.log('PASS: template CRUD/custom fields/escaping, explicit apply, unchanged URL/usage, errors/retry, single-row active/history removal, cancel/error handling, collapsed history/local cleanup, desktop/mobile layout');
  }finally{await browser.close();await new Promise(r=>fixture.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

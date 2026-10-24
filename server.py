@@ -599,6 +599,48 @@ def cleanup_traffic_bindings(payload):
         return {"removed": len(removed), "traffic": traffic_info(record)}
 
 
+def binding_record_token(profile_id, binding):
+    # Ignore mutable samples/status so background collection does not invalidate
+    # a pending click. Scope the identity to this subscription and generation.
+    identity = [profile_id] + [binding.get(key) for key in
+                              ("serverId", "inboundId", "port", "identityHash", "boundAt", "name")]
+    return hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def public_binding_records(record):
+    return [{**copy.deepcopy(binding), "recordIndex": index,
+             "recordToken": binding_record_token(record.get("id", ""), binding)}
+            for index, binding in enumerate(record.get("remoteNodes", []))]
+
+
+def remove_traffic_binding(payload):
+    """Remove one local record, including active ones, without remote effects."""
+    if payload.get("confirmed") is not True:
+        raise ValueError("请确认只删除本地绑定记录，远端节点及计费用量保持不变")
+    index, token = payload.get("recordIndex"), payload.get("recordToken")
+    if type(index) is not int or index < 0 or not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise ValueError("绑定记录参数无效，请刷新列表后重试")
+    # A sweep holding a binding reference must finish before ownership is removed.
+    with ENFORCEMENT_LOCK, LOCK:
+        record = profile_record()
+        rows = record.get("remoteNodes", [])
+        if index >= len(rows) or not hmac.compare_digest(token, binding_record_token(record["id"], rows[index])):
+            raise ValueError("绑定记录已变更，请刷新列表后重试")
+        old_error, had_error = record.get("enforcementError"), "enforcementError" in record
+        record["remoteNodes"] = rows[:index] + rows[index + 1:]
+        record["enforcementError"] = "；".join(dict.fromkeys(b["error"] for b in record["remoteNodes"] if b.get("error")))[:1500]
+        try:
+            save_profiles(load_profiles())
+        except Exception:
+            record["remoteNodes"] = rows
+            if had_error:
+                record["enforcementError"] = old_error
+            else:
+                record.pop("enforcementError", None)
+            raise
+        return {"removed": 1, "traffic": traffic_info(record)}
+
+
 def inherit_plan_binding(record, binding):
     stored = record.get("traffic") or {}
     if not stored.get("planId"):
@@ -696,7 +738,7 @@ def traffic_info(record):
 def _traffic_info(record):
     stored = record.get("traffic") or {}
     if not stored.get("enabled"):
-        return {"configured": False, "plans": subscription_plans(), "bindings": copy.deepcopy(record.get("remoteNodes", [])),
+        return {"configured": False, "plans": subscription_plans(), "bindings": public_binding_records(record),
                 "enforcementError": record.get("enforcementError", "")}
     upload = stored.get("upload", 0)
     download = stored.get("download", 0)
@@ -715,7 +757,7 @@ def _traffic_info(record):
             "exhausted": total is not None and used >= total,
             "expired": expire is not None and expire <= int(time.time()),
             "updatedAt": stored.get("updatedAt"), "enforce": bool(stored.get("enforce")),
-            "bindings": copy.deepcopy(record.get("remoteNodes", [])),
+            "bindings": public_binding_records(record),
             "enforcementError": record.get("enforcementError", ""),
             "lastCheckedAt": record.get("lastEnforcedAt"),
             "revoked": bool(record.get("accessRevoked"))}
@@ -3734,6 +3776,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out({"ok": True, "traffic": traffic_info(profile_record())})
             if path == "/admin/api/traffic/bindings/cleanup":
                 return self.json_out({"ok": True, **cleanup_traffic_bindings(data)})
+            if path == "/admin/api/traffic/bindings/remove":
+                return self.json_out({"ok": True, **remove_traffic_binding(data)})
             if path == "/admin/api/nodes":
                 return self.json_out({"ok": True, **(mutate_node("PUT", data) or {})})
             elif path == "/admin/api/chains": mutate_chain("PUT", data)
