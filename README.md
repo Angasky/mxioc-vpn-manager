@@ -45,7 +45,7 @@ vpn
 
 ### 🧩 节点与订阅
 
-- VLESS、TUIC、Hysteria2、Trojan、Shadowsocks、VMess、SOCKS5、HTTP 和 HTTPS 节点管理
+- VLESS、TUIC、Hysteria2、Trojan、Shadowsocks、VMess、Mieru、SOCKS5、HTTP 和 HTTPS 节点管理
 - 节点分享链接一键导入，兼容 IPv4 与 IPv6
 - Clash YAML / Base64 订阅批量导入
 - 总览集中展示 Clash、V2Ray/v2rayN 与 Shadowrocket 订阅，并为每个链接生成本地二维码
@@ -395,3 +395,7 @@ v2rayN（电脑）与 v2rayNG（安卓）新增独立的节点订阅和 Xray 主
 ### 全流程测试与 BUG 修复
 
 本地完整验证共 181 项全部通过，覆盖真实 HTTP / Cookie / 浏览器流程、计费与限速撤销，以及实际内核配置和主备切换。已修复的问题、性能数据与生产验收边界见 [中文 BUG 报告](docs/bug-report-2026-10-23.md)。
+
+### Mieru / mierus 批量导入
+
+「节点管理」支持手动新增 / 编辑 Mieru（Mihomo）节点，并在「批量链接导入」粘贴一行一条的官方 `mierus://` 链接。支持 TCP / UDP、单端口 / 端口范围、多组端口展开、握手与复用参数；Mihomo 完整订阅保留配置。此功能不在服务器安装 Mieru，不将其转换成 Xray 或小火箭节点。格式、限制和实测范围见 [Mieru 使用说明](docs/mieru.md)。

@@ -894,6 +894,7 @@ code {
 }
 
 .toast {
+  pointer-events: none;
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -3754,7 +3755,7 @@ const OPTION_LABELS = {
   '2022-blake3-aes-256-gcm': 'SS 2022 AES-256（新标准）'
 };
 
-function optionLabel(x) { return OPTION_LABELS[x] || x; }
+function optionLabel(x) { return x === 'mieru' ? 'Mieru' : (OPTION_LABELS[x] || x); }
 function nodeProtocol(x) { return x?.type === 'http' && x?.config?.tls ? 'HTTPS' : optionLabel(x?.type || ''); }
 function options(items, current) {
   return items.map(x => `<option value="${esc(x)}" ${String(x) === String(current) ? 'selected' : ''}>${esc(optionLabel(x))}</option>`).join('');
@@ -3770,6 +3771,18 @@ function protocolFields(type, cfg = {}) {
   let go = cfg['grpc-opts'] || {};
   let wo = cfg['ws-opts'] || {};
   let host = wo.headers?.Host || wo.headers?.host || '';
+
+  if (type === 'mieru') return `
+    <h4 class="protocol-title">Mieru 认证与传输参数</h4>
+    <div class="grid">
+      <div><label for="nMieruUsername">用户名</label><input id="nMieruUsername" required value="${esc(cfg.username || '')}"></div>
+      <div><label for="nMieruPassword">密码</label><input id="nMieruPassword" type="password" required value="${esc(cfg.password || '')}"></div>
+      <div><label for="nMieruTransport">传输协议</label><select id="nMieruTransport">${options(['TCP','UDP'],cfg.transport || 'TCP')}</select></div>
+      <div><label for="nMieruRange">端口范围（可选）</label><input id="nMieruRange" value="${esc(cfg['port-range'] || '')}" placeholder="例如 2090-2099"><p class="hint">填写范围后停用上方单端口，两者不能同时填写。</p></div>
+      <div><label for="nMieruMultiplexing">多路复用</label><select id="nMieruMultiplexing">${options(['','MULTIPLEXING_OFF','MULTIPLEXING_LOW','MULTIPLEXING_MIDDLE','MULTIPLEXING_HIGH','MULTIPLEXING_DEFAULT'],cfg.multiplexing || '')}</select></div>
+      <div><label for="nMieruHandshake">握手模式</label><select id="nMieruHandshake">${options(['','HANDSHAKE_STANDARD','HANDSHAKE_NO_WAIT','HANDSHAKE_DEFAULT'],cfg['handshake-mode'] || '')}</select></div>
+      <div class="span2"><label for="nMieruPattern">流量特征（可选 Base64）</label><textarea id="nMieruPattern" placeholder="官方 traffic-pattern 参数">${esc(cfg['traffic-pattern'] || '')}</textarea></div>
+    </div><p class="hint">使用支持 Mieru 的 Mihomo 内核；分享链接为 mierus://。本页配置客户端连接，不会在服务器安装 Mieru。Xray / sing-box 模板及小火箭转换不提供此协议。关闭 UDP 转发时请使用完整 Mihomo 订阅。</p>`;
 
   if (type === 'vless') return `
     <h4 class="protocol-title">VLESS 认证与传输参数</h4>
@@ -3904,6 +3917,10 @@ function renderProtocol() {
   let box = $('protocolBox');
   if (box) {
     box.innerHTML = protocolFields(type, window.nodeDraft || {});
+    const range = $('nMieruRange'), port = $('nPort');
+    const syncMieruPort = () => { if (port) { const ranged = !!range?.value.trim(); port.disabled = ranged; port.required = !ranged; } };
+    if (range) range.oninput = syncMieruPort;
+    syncMieruPort();
     let udp = $('nUdp');
     if (udp) {
       udp.disabled = ['http', 'https'].includes(type);
@@ -3924,7 +3941,15 @@ function readNodeForm() {
   let port = numberOrText(val('nPort'));
   let cfg = { ...(window.nodeDraft || {}), name: val('nName'), type, server: val('nServer'), port, udp: on('nUdp') };
 
-  if (type === 'vless') {
+  if (type === 'mieru') {
+    cfg.username = val('nMieruUsername'); cfg.password = val('nMieruPassword');
+    cfg.transport = val('nMieruTransport');
+    if (val('nMieruRange')) { cfg['port-range'] = val('nMieruRange'); delete cfg.port; }
+    else delete cfg['port-range'];
+    for (const [field, id] of [['multiplexing','nMieruMultiplexing'],['handshake-mode','nMieruHandshake'],['traffic-pattern','nMieruPattern']]) {
+      if (val(id)) cfg[field] = val(id); else delete cfg[field];
+    }
+  } else if (type === 'vless') {
     cfg.uuid = val('nUuid');
     cfg.network = val('nNetwork');
     cfg.tls = on('nTls');
@@ -4032,7 +4057,7 @@ function nodeModal(index) {
         </div>
         <div>
           <label>协议类型</label>
-          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'socks5', 'http', 'https'], formType || 'vless')}</select>
+          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'mieru', 'socks5', 'http', 'https'], formType || 'vless')}</select>
         </div>
         <div>
           <label>服务器域名 / IP</label>
@@ -4307,8 +4332,8 @@ function importNodeModal() {
   openModal('IMPORT_NODES // 批量通过链接导入节点', `
   <form id="editForm">
     <label>节点分享链接</label>
-    <textarea id="nodeLink" required style="min-height:220px" placeholder="每行粘贴一条链接：&#10;vless://...&#10;tuic://...&#10;hysteria2://...&#10;&#10;支持 vless、tuic、hysteria2 / hy2、trojan、ss、vmess、socks5、http、https。"></textarea>
-    <div class="note">支持一次粘贴多条链接：每行一条，空行会忽略。系统会逐条解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；同名节点将自动追加序号，不会覆盖已有节点。</div>
+    <textarea id="nodeLink" required style="min-height:220px" placeholder="每行粘贴一条链接：&#10;vless://...&#10;tuic://...&#10;mierus://用户名:密码@服务器?profile=名称&amp;port=2999&amp;protocol=TCP&#10;hysteria2://...&#10;&#10;支持 mierus（Mieru）、vless、tuic、hysteria2 / hy2、trojan、ss、vmess、socks5、http、https。"></textarea>
+    <div class="note">支持一次粘贴多条链接：每行一条，空行会忽略。系统会逐条解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；Mieru 一条链接中的多组端口 / 协议会分别导入；同名节点将自动追加序号，不会覆盖已有节点。mieru:// 完整配置请先使用官方工具导出为 mierus://。</div>
     <label class="inlinecheck">
       <input id="importAll" type="checkbox" checked>
       <span>自动加入所有业务代理策略组（广告拦截组除外）</span>

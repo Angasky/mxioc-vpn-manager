@@ -117,6 +117,20 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
    assert.equal(reality['support-x25519mlkem768'],flag,'editor must not mutate source');
   }
  }
+ for(const theme of ['high','low','pink']) {
+  t.setTheme(theme);
+  const config={name:'Mieru test',type:'mieru',server:'example.com',port:2999,username:'user',password:'test-password',transport:'TCP',multiplexing:'MULTIPLEXING_HIGH','handshake-mode':'HANDSHAKE_NO_WAIT',udp:true};
+  t.S.data.nodes=[{index:0,name:config.name,config}];t.nodeModal(0);
+  assert.equal($('nType').value,'mieru');assert.equal($('nMieruUsername').value,'user');
+  assert.equal(t.readNodeForm().transport,'TCP');assert.equal(t.readNodeForm().password,'test-password');
+  $('nMieruTransport').value='UDP';$('nMieruRange').value='2090-2099';$('nMieruRange').oninput();
+  assert($('nPort').disabled);assert(!$('nPort').required);
+  const range=t.readNodeForm();assert.equal(range['port-range'],'2090-2099');assert(!Object.hasOwn(range,'port'));assert.equal(range.transport,'UDP');
+  $('nMieruRange').value='';$('nMieruRange').oninput();$('nPort').value='3001';
+  assert(!$('nPort').disabled);assert($('nPort').required);assert.equal(t.readNodeForm().port,3001);
+  assert(!Object.hasOwn(t.readNodeForm(),'port-range'));assert.equal(config.port,2999);
+ }
+ console.log('PASS: Mieru create/edit, TCP/UDP, range mutual exclusion and credentials in all themes');
  t.S.data.nodes=previousNodes;
  console.log('PASS: Reality handshake mode and advanced options survive edits in all themes');
  console.log('PASS: traffic multiplier submission and subscription-owned node bandwidth apply/clear');

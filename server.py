@@ -135,14 +135,17 @@ def host_metrics(identity):
 
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
-SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5", "http"}
+SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5", "http", "mieru"}
+# A node supported by the Mihomo subscription is not necessarily supported by
+# Xray or Shadowrocket. Keep their existing export compatibility explicit.
+CLIENT_LINK_TYPES = SUPPORTED_NODE_TYPES - {"mieru"}
 CONVERSION_FORMATS = {
     "v2rayn": {
-        "name": "电脑 v2rayN 节点订阅", "types": SUPPORTED_NODE_TYPES,
+        "name": "电脑 v2rayN 节点订阅", "types": CLIENT_LINK_TYPES,
         "note": "新版 v2rayN；独立信息节点显示流量和剩余时间，更新订阅刷新。信息节点不可连接；TUIC/Hysteria2 需支持的内核。",
     },
     "v2rayng": {
-        "name": "安卓 v2rayNG 节点订阅", "types": SUPPORTED_NODE_TYPES - {"tuic"},
+        "name": "安卓 v2rayNG 节点订阅", "types": CLIENT_LINK_TYPES - {"tuic"},
         "note": "新版 v2rayNG；提供标准流量和到期响应头，过滤不支持的 TUIC。节点列表不含主备逻辑。",
     },
     "v2rayn-ha": {
@@ -156,7 +159,7 @@ CONVERSION_FORMATS = {
         "note": "新版 v2rayNG 自定义 JSON 订阅；每个主备组一份完整 Xray 配置，不与普通节点订阅混用。端口需与 App 的本地 SOCKS 设置一致（默认 10808）。",
     },
     "shadowrocket-ha": {
-        "name": "小火箭主备 · 第一步：节点订阅", "types": SUPPORTED_NODE_TYPES, "kind": "shadowrocket-nodes",
+        "name": "小火箭主备 · 第一步：节点订阅", "types": CLIENT_LINK_TYPES, "kind": "shadowrocket-nodes",
         "note": "添加到首页订阅。仅包含受管主备组的转发路径，名称与第二步策略配置对应；流量与到期信息随订阅更新。",
     },
     "shadowrocket-config": {
@@ -165,12 +168,12 @@ CONVERSION_FORMATS = {
     },
     "v2ray": {
         "name": "V2Ray 通用节点订阅（兼容旧链接）",
-        "types": SUPPORTED_NODE_TYPES,
+        "types": CLIENT_LINK_TYPES,
         "note": "适合新版 v2rayN；旧版 V2Ray/v2rayNG 可能不支持 TUIC、Hysteria2 或 Reality。",
     },
     "shadowrocket": {
         "name": "Shadowrocket（小火箭）订阅",
-        "types": SUPPORTED_NODE_TYPES,
+        "types": CLIENT_LINK_TYPES,
         "note": "适合新版 Shadowrocket；旧版本可能无法识别 TUIC、Hysteria2 或 Reality。",
     },
 }
@@ -1942,8 +1945,13 @@ def validate_config(doc):
             if ref not in known:
                 raise ValueError(f"策略组 {group['name']} 引用了不存在的项目：{ref}")
     for node in proxies:
-        if not node.get("type") or not node.get("server") or not node.get("port"):
+        if not node.get("type") or not node.get("server") or not (node.get("port") or (node.get("type") == "mieru" and node.get("port-range"))):
             raise ValueError(f"节点 {node.get('name', '?')} 缺少 type、server 或 port")
+        if node.get("type") == "mieru":
+            from mieru_adapter import validate as validate_mieru
+            validate_mieru(node)
+            if node.get("transport") not in ("TCP", "UDP"):
+                raise ValueError("Mieru YAML 必须明确设置 transport: TCP 或 UDP")
         dialer = node.get("dialer-proxy")
         if dialer and dialer not in known:
             raise ValueError(f"链式节点 {node.get('name', '?')} 引用了不存在的前置中转：{dialer}")
@@ -2141,7 +2149,7 @@ def normalize_ipv6_authority(link):
 
 
 SHARE_LINK_PATTERN = re.compile(
-    r"(?i)(?:vless|tuic|hysteria2|hy2|trojan|ss|vmess|socks5|socks|https?)://[^\s<>]+"
+    r"(?i)(?:mierus|mieru|vless|tuic|hysteria2|hy2|trojan|ss|vmess|socks5|socks|https?)://[^\s<>]+"
 )
 
 
@@ -2165,6 +2173,12 @@ def parse_node_link(link):
     if not link or "://" not in link:
         raise ValueError("请输入完整的节点链接")
     scheme = link.split("://", 1)[0].lower()
+    if scheme in ("mierus", "mieru"):
+        from mieru_adapter import parse_nodes
+        nodes = [validate_node_config(node) for node in parse_nodes(link)]
+        if len(nodes) != 1:
+            raise ValueError("此 Mieru 链接含多组端口，请使用批量导入以保留全部节点")
+        return nodes[0]
     if scheme == "hy2":
         link = "hysteria2://" + link.split("://", 1)[1]
         scheme = "hysteria2"
@@ -2336,6 +2350,13 @@ def parse_node_link(link):
     return normalize_reality_options(config)
 
 
+def parse_node_links(link):
+    if str(link).lower().startswith(('mierus://', 'mieru://')):
+        from mieru_adapter import parse_nodes
+        return [validate_node_config(node) for node in parse_nodes(link)]
+    return [parse_node_link(link)]
+
+
 def eligible_group_names(doc):
     return [group.get("name") for group in doc.get("proxy-groups", [])
             if isinstance(group, dict) and group.get("name")
@@ -2442,11 +2463,11 @@ def parse_subscription_text(text):
                 skipped.append(str(node.get("name") or node_type or "未知协议"))
                 continue
             node.pop("dialer-proxy", None)
-            if not node.get("name") or not node.get("server") or not node.get("port"):
+            if not node.get("name") or not node.get("server") or not (node.get("port") or (node_type == "mieru" and node.get("port-range"))):
                 skipped.append(str(node.get("name") or "信息不完整的节点"))
                 continue
             try:
-                nodes.append(normalize_reality_options(node))
+                nodes.append(validate_node_config(node) if node_type == "mieru" else normalize_reality_options(node))
             except ValueError as error:
                 skipped.append(f"{node.get('name', '未知节点')}（{error}）")
         return nodes, skipped
@@ -2463,7 +2484,7 @@ def parse_subscription_text(text):
         if not line:
             continue
         try:
-            nodes.append(parse_node_link(line))
+            nodes.extend(parse_node_links(line))
         except Exception:
             skipped.append(line.split("#", 1)[-1][:80] if "#" in line else "无法识别的节点")
     if not nodes:
@@ -2540,16 +2561,16 @@ def import_node_links(payload):
     add_to_groups = bool(payload.get("addToGroups", True))
     for number, link in enumerate(links, start=1):
         try:
-            node = parse_node_link(link)
-            original_name = str(node.get("name") or "导入节点")
-            node["name"] = unique_node_name(original_name, used)
-            used.add(node["name"])
-            if node["name"] != original_name:
-                renamed.append({"from": original_name, "to": node["name"]})
-            nodes.append(node)
-            if add_to_groups:
-                add_node_to_groups(doc, node["name"])
-            added.append(node["name"])
+            for node in parse_node_links(link):
+                original_name = str(node.get("name") or "导入节点")
+                node["name"] = unique_node_name(original_name, used)
+                used.add(node["name"])
+                if node["name"] != original_name:
+                    renamed.append({"from": original_name, "to": node["name"]})
+                nodes.append(node)
+                if add_to_groups:
+                    add_node_to_groups(doc, node["name"])
+                added.append(node["name"])
         except Exception as exc:
             failed.append({"line": number, "reason": str(exc)})
     if added:
@@ -2580,6 +2601,9 @@ def add_transport_query(node, query):
 
 def node_to_uri(node):
     node_type = str(node.get("type", "")).lower()
+    if node_type == "mieru":
+        from mieru_adapter import to_uri
+        return to_uri(node)
     name = quote(str(node.get("name", "节点")), safe="")
     address = endpoint(node)
     query = {}
@@ -2730,6 +2754,8 @@ def client_configuration_export(profile_id, format_id):
     for item, nodes in groups:
         try:
             for node in nodes:
+                if node.get("type") not in CLIENT_LINK_TYPES:
+                    raise ValueError("该客户端不支持 Mieru，请使用 Mihomo 完整订阅")
                 node_to_uri(node)
             compatible.append((item, nodes))
         except (ValueError, KeyError, TypeError) as exc:
@@ -2843,7 +2869,7 @@ def snapshot_view():
         proxies = []
         for index, node in enumerate(doc.get("proxies", [])):
             proxies.append({"index": index, "name": node.get("name", ""), "type": node.get("type", ""),
-                            "server": node.get("server", ""), "port": node.get("port", ""), "config": node})
+                            "server": node.get("server", ""), "port": node.get("port-range") or node.get("port", ""), "config": node})
         groups = []
         for index, group in enumerate(doc.get("proxy-groups", [])):
             groups.append({"index": index, "name": group.get("name", ""), "type": group.get("type", ""),
@@ -3070,7 +3096,12 @@ def validate_node_config(config):
         kind, node["tls"] = "http", True
     if kind not in SUPPORTED_NODE_TYPES:
         raise ValueError("暂不支持该节点协议")
-    node["type"], node["port"] = kind, valid_port(node.get("port"))
+    node["type"] = kind
+    if kind == "mieru":
+        from mieru_adapter import validate as validate_mieru
+        node = validate_mieru(node)
+    else:
+        node["port"] = valid_port(node.get("port"))
     name = str(node.get("name") or "").strip()
     if not name or len(name) > 200 or any(c in name for c in "\r\n\0"):
         raise ValueError("节点名称须为 1–200 字符且不能含换行")

@@ -148,6 +148,23 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(len(snapshot['nodes']),1)
         self.manager.connect.assert_not_called()
 
+    def test_mieru_batch_import_edit_share_and_full_subscription(self):
+        self.request('POST','/import-node',{'links':'mierus://user:test-password@example.com?profile=Mieru&port=2999&port=3000-3002&protocol=TCP&protocol=UDP'})
+        snapshot, _ = self.request('GET','/snapshot')
+        self.assertEqual(len(snapshot['nodes']),2)
+        self.assertEqual(snapshot['nodes'][1]['port'],'3000-3002')
+        config = snapshot['nodes'][1]['config']
+        config['handshake-mode'] = 'HANDSHAKE_NO_WAIT'
+        self.request('PUT','/nodes',{'oldName':config['name'],'config':config})
+        from urllib.parse import quote
+        shared, _ = self.request('GET','/nodes/share?name='+quote(config['name']))
+        self.assertEqual(server.parse_node_link(shared['uri']),config)
+        body, _ = self.request('GET','/sub/'+server.profile_record()['slug'],public=True)
+        exported = server.yaml_load(body.decode())
+        self.assertEqual(exported['proxies'][1]['port-range'],'3000-3002')
+        self.assertEqual(exported['proxies'][1]['handshake-mode'],'HANDSHAKE_NO_WAIT')
+        self.manager.connect.assert_not_called()
+
     def test_csrf_validation_logout_and_persisted_cookie(self):
         self.request('POST','/profiles',{'name':'bad-origin'},origin='http://untrusted.example',status=403)
         server.SESSIONS = None
