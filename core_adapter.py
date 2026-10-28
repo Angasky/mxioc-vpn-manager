@@ -156,6 +156,60 @@ class CoreAPI:
             'inbounds': [], 'outbounds': [], 'routing': {'rules': []}}
         self.pending = None
 
+    def check_user_stats_support(self):
+        existing = self.native.get('api') if self.kind == 'xray' else self.native.get('experimental', {}).get('v2ray_api')
+        if existing and not self.state.get('userStats'):
+            raise ValueError('原生配置已有统计 API，请先人工核对，不能自动覆盖')
+        binary = self.binary if self.kind == 'xray' else '/usr/local/bin/xray'
+        code, _ = self.manager.execute(self.ssh, self.record, 'test -x ' + shlex.quote(binary), timeout=15)
+        if code:
+            raise ValueError('独立内核用户计量需要 /usr/local/bin/xray 查询工具；未绑定订阅，不能退回端口计量')
+        if self.kind == 'sing-box':
+            code, output = self.manager.execute(self.ssh, self.record, self.binary + ' version', timeout=15)
+            if code or 'with_v2ray_api' not in output:
+                raise ValueError('此 sing-box 构建缺少 with_v2ray_api，不能按用户计量；请使用支持此功能的构建或选择 Xray / 面板入站')
+        return binary
+
+    def enable_user_stats(self, email):
+        binary = self.check_user_stats_support()
+        state = copy.deepcopy(self.state)
+        stats = state.get('userStats')
+        if not stats:
+            stats = {'listen': '127.0.0.1:10085', 'binary': binary, 'users': []}
+        if email in stats['users']:
+            return
+        stats['users'].append(email)
+        state['userStats'] = stats
+        self.apply(state)
+        # Verify StatsService actually exists (sing-box builds may omit it).
+        self.user_stats()
+
+    def user_stats(self):
+        stats = self.state.get('userStats')
+        if not stats:
+            return None
+        command = (shlex.quote(stats['binary']) + ' api statsquery --server=' +
+                   shlex.quote(stats['listen']) + " --pattern='user>>>'")
+        code, output = self.manager.execute(self.ssh, self.record, command, timeout=20, max_output=2 * 1024 * 1024)
+        if code:
+            raise ValueError('独立用户 StatsService 读取失败，请检查内核构建与本地统计接口')
+        try:
+            entries = json.loads(output).get('stat', [])
+            users = {}
+            for entry in entries:
+                parts = entry['name'].split('>>>')
+                if len(parts) == 4 and parts[0] == 'user' and parts[2] == 'traffic' and parts[3] in ('uplink', 'downlink'):
+                    value = int(entry.get('value', 0))
+                    if value < 0:
+                        raise ValueError()
+                    users.setdefault(parts[1], {})['up' if parts[3] == 'uplink' else 'down'] = value
+            # Native StatsService registers counters lazily, a missing direction
+            # before first traffic is zero; transport/API failure is never zero.
+            return [{'email': email, 'up': users.get(email, {}).get('up', 0),
+                     'down': users.get(email, {}).get('down', 0)} for email in stats['users']]
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError('独立用户 StatsService 返回无效计数') from exc
+
     def apply(self, state):
         native = copy.deepcopy(self.native)
         old_tags = {r['tag'] for r in self.state['inbounds']}
@@ -171,6 +225,8 @@ class CoreAPI:
                 item = {k: copy.deepcopy(row[k]) for k in ('tag', 'listen', 'port', 'protocol') if k in row}
                 item['listen'] = item.get('listen') or '0.0.0.0'
                 item['settings'] = json_object(row['settings'])
+                if 'clients' in item['settings']:
+                    item['settings']['clients'] = [c for c in item['settings']['clients'] if c.get('enable') is not False]
                 item['streamSettings'] = json_object(row.get('streamSettings', {}))
                 item['sniffing'] = json_object(row.get('sniffing', {}))
                 native['inbounds'].append(item)
@@ -190,6 +246,19 @@ class CoreAPI:
             rules = native.setdefault('routing', {}).setdefault('rules', [])
             rules[:] = [r for r in rules if r.get('outboundTag') not in previous]
             rules[:0] = copy.deepcopy(state.get('routing', {}).get('rules', []))
+        if state.get('userStats'):
+            stats = state['userStats']
+            if self.kind == 'xray':
+                native['api'] = {'tag': 'mxioc-user-stats', 'listen': stats['listen'], 'services': ['StatsService']}
+                native.setdefault('stats', {})
+                levels = native.setdefault('policy', {}).setdefault('levels', {})
+                from remote_manager import json_object
+                for row in new_rows:
+                    for client in json_object(row['settings']).get('clients', []):
+                        levels.setdefault(str(client.get('level', 0)), {}).update(statsUserUplink=True, statsUserDownlink=True)
+            else:
+                native.setdefault('experimental', {})['v2ray_api'] = {
+                    'listen': stats['listen'], 'stats': {'enabled': True, 'users': stats['users']}}
         raw = json.dumps(native, ensure_ascii=False)
         encoded = base64.b64encode(raw.encode()).decode()
         check = self.binary + (' run -test -config' if self.kind == 'xray' else ' check -c')

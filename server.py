@@ -606,7 +606,7 @@ def binding_record_token(profile_id, binding):
     # Ignore mutable samples/status so background collection does not invalidate
     # a pending click. Scope the identity to this subscription and generation.
     identity = [profile_id] + [binding.get(key) for key in
-                              ("serverId", "inboundId", "port", "identityHash", "boundAt", "name")]
+                              ("serverId", "inboundId", "port", "identityHash", "boundAt", "name", "userEmail", "userHash")]
     return hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -694,6 +694,8 @@ def apply_subscription_plan(payload):
             raise ValueError("该订阅节点已撤销，请先续期并重新创建节点，再套用套餐")
         if plan["resetPeriod"] != "monthly" and any(b.get("monthlyPaused") for b in record.get("remoteNodes", [])):
             raise ValueError("请先增加月额度并同步恢复暂停节点，再切换一次性流量套餐")
+        if plan['speedMbps'] and any(b.get('scope') == 'user' and b.get('status') == 'active' for b in record.get('remoteNodes', [])):
+            raise ValueError('共用入站暂不支持按用户限速，请选择不限速套餐')
         if (record.get("traffic") or {}).get("enforce"):
             if not enforce_profile(record["id"], revoke=False):
                 raise ValueError("原用量结算失败，套餐未套用，请恢复服务器连接后重试")
@@ -806,7 +808,10 @@ def update_traffic(payload):
         if payload.get("enforce") is True and not old.get("enforce"):
             for binding in profile_record().get("remoteNodes", []):
                 if binding.get("status") == "active":
-                    remote_manager().ensure_meter(binding["serverId"], binding["inboundId"])
+                    if binding.get('scope') == 'user':
+                        remote_manager().prepare_user_meter(binding['serverId'], binding['inboundId'], binding['userEmail'])
+                    else:
+                        remote_manager().ensure_meter(binding["serverId"], binding["inboundId"])
         result = _update_traffic(payload)
         # Normal edits must not synchronously SSH to every bound server.
         # The existing sweep handles metering/revocation; explicit sync remains available.
@@ -843,7 +848,7 @@ def validate_traffic_update(payload, record):
     if type(enforce) is not bool:
         raise ValueError("服务器强制限制参数无效")
     if enforce and not record.get("accessRevoked") and not any(x.get("status") == "active" for x in record.get("remoteNodes", [])):
-        raise ValueError("请先创建或绑定该订阅专属的服务器入站，再启用强制限制")
+        raise ValueError("请先在服务器入站中添加该订阅的独立用户，再启用强制限制")
     from bandwidth import multiplier_units
     previous = record.get("traffic") or {}
     units = multiplier_units(payload.get("multiplier", previous.get("multiplierUnits", 1000) / 1000))
@@ -967,6 +972,10 @@ def import_server_inbound(payload):
         row = next((r for r in remote_manager().inbounds(server_id)["inbounds"] if r["id"] == inbound_id), None)
         if not row:
             raise ValueError("远端入站不存在，请刷新服务器节点列表")
+        if any(b.get('scope') == 'user' and b.get('status') in ('active', 'provisioning')
+               and (b.get('serverId'), b.get('inboundId')) == (server_id, inbound_id)
+               for owner in load_profiles()['profiles'] for b in owner.get('remoteNodes', [])):
+            return provision_subscription_user({'serverId': server_id, 'inboundId': inbound_id})
         links = row.get("shareLinks") or []
         if not links:
             raise ValueError("该入站没有可导入的兼容链接")
@@ -1041,6 +1050,163 @@ def import_server_inbound(payload):
             raise
 
 
+def binding_identity(row, binding):
+    if binding.get('scope') == 'user':
+        from shared_users import endpoint_identity
+        return endpoint_identity(row)
+    return remote_node_identity(row)
+
+
+def import_owned_user_links(record, binding, links):
+    """Only accept freshly read links of the UUID owned by this subscription."""
+    parsed = [validate_node_config(parse_node_link(link)) for link in links]
+    if len(parsed) != 1:
+        raise ValueError('该用户未返回唯一兼容连接，绑定已保留，请核对后重试')
+    with LOCK:
+        doc = read_config()
+        nodes = doc.setdefault('proxies', [])
+        node = parsed[0]
+        previous = next((n for n in nodes if n.get('name') in binding.get('importedNames', []) and
+                         n.get('type') == node.get('type') and
+                         n.get('uuid', n.get('password')) == node.get('uuid', node.get('password'))), None)
+        existing = next((n for n in nodes if all(n.get(k) == node.get(k) for k in
+                                              ('type', 'server', 'port', 'uuid', 'password'))), None)
+        if previous or existing:
+            node['name'] = (previous or existing)['name']
+            index = next(i for i, n in enumerate(nodes) if n is (previous or existing))
+            nodes[index] = node
+            added = 0
+        else:
+            used = {n['name'] for n in nodes} | {g['name'] for g in doc.get('proxy-groups', [])} | BUILTINS
+            node['name'] = unique_node_name(node['name'], used)
+            nodes.append(node)
+            add_node_to_groups(doc, node['name'])
+            added = 1
+        write_config(doc, 'subscription-user-import')
+        binding['importedNames'] = [node['name']]
+        save_profiles(load_profiles())
+        return {'added': added, 'existing': 1-added, 'bound': True,
+                'enforcementEnabled': bool((record.get('traffic') or {}).get('enforce'))}
+
+
+def provision_subscription_user(payload):
+    from shared_users import settings
+    from remote_manager import positive_id
+    with ENFORCEMENT_LOCK:
+        record = profile_record()
+        if subscription_blocked(record):
+            raise ValueError('订阅已到期或流量用尽，请先续期或调整额度')
+        if (record.get('traffic') or {}).get('speedMbps'):
+            raise ValueError('共用入站暂不支持按用户限速，请先将套餐限速设为不限速')
+        manager = remote_manager()
+        server_id = str(payload.get('serverId', ''))
+        inbound_id = positive_id(payload.get('inboundId')) if payload.get('inboundId') is not None else None
+        if inbound_id is None:
+            manager.preflight_user_support(server_id)
+            if payload.get('template') == 'shadowsocks':
+                raise ValueError('此 Shadowsocks 模板不是多用户协议，请选择 VLESS / VMess / Trojan')
+            created = manager.create_inbound(server_id, payload)
+            row = created['inbound']
+            inbound_id = row['id']
+            initial = settings(row).get('clients', [])
+            if len(initial) != 1:
+                raise ValueError('入站已创建但初始用户不唯一，请在服务器列表核对，不要重复创建')
+            client = initial[0]
+        else:
+            row = next((r for r in manager.inbounds(server_id)['inbounds'] if r['id'] == inbound_id), None)
+            if not row:
+                raise ValueError('远端入站不存在')
+            client = None
+        try:
+            return _provision_user_at_inbound(record, manager, server_id, row, client)
+        except Exception as exc:
+            if payload.get('inboundId') is None:
+                raise ValueError(f'共用入站已创建（ID {inbound_id}），后续用户绑定或导入未完成：{exc}。请从此入站重试，不要重复创建') from None
+            raise
+
+
+def _provision_user_at_inbound(record, manager, server_id, row, client):
+    """Called under ENFORCEMENT_LOCK; all ownership changes are user-scoped."""
+    from shared_users import new_user, endpoint_identity, user_identity, find_user, settings, counters
+    inbound_id = row['id']
+    matches = [(owner, b) for owner in load_profiles()['profiles'] for b in owner.get('remoteNodes', [])
+               if (b.get('serverId'), b.get('inboundId')) == (server_id, inbound_id)
+               and b.get('status') in ('active', 'provisioning')]
+    legacy = [(o, b) for o, b in matches if b.get('scope') != 'user']
+    if legacy:
+        # Upgrade only the current owner's dedicated record. Never migrate
+        # another owner's permissions or change a live port policing rule.
+        if len(legacy) != 1 or legacy[0][0]['id'] != record['id']:
+            raise ValueError('该入站仍有其他订阅的旧版专属绑定，请由原订阅先迁移用户绑定')
+        binding = legacy[0][1]
+        if binding.get('monthlyPaused') or row.get('enable') is False:
+            raise ValueError('旧入站处于暂停或停用状态，请先恢复后再迁移')
+        if binding.get('bandwidth', {}).get('uploadKbps') or binding.get('bandwidth', {}).get('downloadKbps'):
+            raise ValueError('请先清除旧版端口限速后迁移用户绑定')
+        require_dedicated_inbound(row)
+        if binding.get('identityHash') and binding['identityHash'] != remote_node_identity(row):
+            raise ValueError('旧版入站身份已变化，不能自动迁移')
+        if (record.get('traffic') or {}).get('enforce') and not enforce_profile(record['id'], revoke=False):
+            raise ValueError('迁移前旧用量结算失败，绑定未修改')
+        clients = settings(row).get('clients', [])
+        if len(clients) != 1 or not clients[0].get('email'):
+            raise ValueError('旧入站缺少唯一用户身份，不能迁移')
+        client = clients[0]
+        manager.prepare_user_meter(server_id, inbound_id, client['email'])
+        # Do not interpret historic user totals as newly used traffic.
+        fresh = next(r for r in manager.inbounds(server_id)['inbounds'] if r['id'] == inbound_id)
+        proposed = {**binding, 'scope': 'user', 'userEmail': client['email'],
+                    'userHash': user_identity(client), 'identityHash': endpoint_identity(row)}
+        reading = counters(fresh, proposed)
+        with LOCK:
+            binding.update(proposed, up=reading['up'], down=reading['down'], counterSource=reading['source'])
+            save_profiles(load_profiles())
+    else:
+        own = [b for owner, b in matches if owner['id'] == record['id'] and b.get('scope') == 'user']
+        if own:
+            binding = own[0]
+            current = find_user(row, binding, missing_ok=binding.get('status') == 'provisioning')
+            if current is None:
+                raise ValueError('上次创建未在远端找到用户，请删除该待核对绑定记录后重试；不会重复创建 UUID')
+            with LOCK:
+                binding.update(status='active', error='')
+                save_profiles(load_profiles())
+        else:
+            client = client or new_user(row)
+            manager.prepare_user_meter(server_id, inbound_id, client['email'])
+            binding = {'scope': 'user', 'serverId': server_id, 'inboundId': inbound_id,
+                       'userEmail': client['email'], 'userHash': user_identity(client),
+                       'identityHash': endpoint_identity(row), 'name': row.get('remark', ''),
+                       'port': row['port'], 'status': 'provisioning', 'boundAt': int(time.time()),
+                       'up': 0, 'down': 0, 'counterSource': 'pending',
+                       'multiplierUnits': (record.get('traffic') or {}).get('multiplierUnits', 1000), 'error': ''}
+            # Durable ownership before an ambiguous remote mutation. A retry
+            # recovers by email + fingerprint instead of allocating another UUID.
+            with LOCK:
+                record.setdefault('remoteNodes', []).append(binding)
+                try:
+                    save_profiles(load_profiles())
+                except Exception:
+                    record['remoteNodes'].remove(binding)
+                    raise
+            try:
+                manager.subscription_user(server_id, binding, 'add', client)
+            except Exception:
+                binding['error'] = '用户创建结果待核对，请重试添加；总控已保留身份记录'
+                save_profiles(load_profiles())
+                raise ValueError(binding['error']) from None
+            with LOCK:
+                binding.update(status='active', error='')
+                save_profiles(load_profiles())
+    try:
+        links = manager.subscription_user(server_id, binding, 'read')['shareLinks']
+        result = import_owned_user_links(record, binding, links)
+    except Exception:
+        raise ValueError('独立用户绑定已保留，但订阅导入未完成；请在同一入站重试添加，不要重新创建入站') from None
+    ENFORCEMENT_WAKE.set()
+    return {**result, 'binding': copy.deepcopy(binding), 'inbound': row, 'shareLinks': links}
+
+
 def set_node_bandwidth(payload):
     from bandwidth import rate_kbps
     from remote_manager import positive_id
@@ -1052,6 +1218,8 @@ def set_node_bandwidth(payload):
                         and b["inboundId"] == inbound_id and b.get("status") == "active"), None)
         if not binding:
             raise ValueError("请先将该专属入站绑定当前订阅，不能限制其他订阅或未绑定节点")
+        if binding.get('scope') == 'user':
+            raise ValueError('共用入站暂不支持按用户限速，不能对整个端口下发限速')
         if upload or download:
             if subscription_blocked(record):
                 raise ValueError("订阅已到期或流量用尽，请先续期")
@@ -1093,6 +1261,25 @@ def set_node_multiplier(payload):
 
 def sync_monthly_pause(manager, record, binding, row):
     pause = traffic_info(record).get("exhausted", False)
+    if binding.get('scope') == 'user':
+        from shared_users import find_user
+        user = find_user(row, binding)
+        if not pause and not binding.get('monthlyPaused'):
+            return
+        if pause and not binding.get('monthlyPaused'):
+            if user.get('enable', True) is False:
+                raise ValueError('用户已被手动停用，不接管自动恢复')
+            with LOCK:
+                binding['monthlyPaused'] = True
+                save_profiles(load_profiles())
+        if user.get('enable', True) != (not pause):
+            manager.subscription_user(binding['serverId'], binding, 'pause' if pause else 'resume')
+        if not pause:
+            with LOCK:
+                binding.pop('monthlyPaused', None)
+                save_profiles(load_profiles())
+        return
+
     if not pause and not binding.get("monthlyPaused"):
         return
     with LOCK:
@@ -1122,7 +1309,7 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
             record = profile_record(profile_id)
             if reset_monthly_traffic(record):
                 save_profiles(load_profiles())
-            bindings = [b for b in record.get("remoteNodes", []) if b.get("status") == "active"]
+            bindings = [b for b in record.get("remoteNodes", []) if b.get("status") in ("active", "provisioning")]
             if only_binding is not None:
                 bindings = [b for b in bindings if (b["serverId"], b["inboundId"]) == only_binding]
             enabled = bool((record.get("traffic") or {}).get("enforce"))
@@ -1143,7 +1330,24 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
             if rows is None:
                 continue
             row = rows.get(binding["inboundId"])
-            if (row is not None and (not binding.get("identityHash") or binding["identityHash"] == remote_node_identity(row))
+            if row is not None and binding.get('scope') == 'user':
+                from shared_users import find_user, check_email_namespace
+                try:
+                    check_email_namespace(rows.values(), binding['userEmail'])
+                    user = find_user(row, binding, missing_ok=True)
+                    if user is None:
+                        with LOCK:
+                            binding.update(status='missing', error='远端订阅用户已不存在')
+                        continue
+                    binding.update(status='active', error='')
+                except ValueError as exc:
+                    with LOCK:
+                        binding.update(status='identity_changed', invalidatedAt=int(time.time()), error=str(exc))
+                    errors.append(str(exc))
+                    mismatches.add((server_id, binding['inboundId']))
+                    continue
+
+            if (row is not None and (not binding.get("identityHash") or binding["identityHash"] == binding_identity(row, binding))
                     and (record.get("traffic") or {}).get("resetPeriod") == "monthly"
                     and not traffic_info(record).get("expired")):
                 try:
@@ -1171,7 +1375,7 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                         if binding.get("bandwidth"):
                             current["bandwidth"] = copy.deepcopy(binding["bandwidth"])
                     continue
-                if current.get("identityHash") and current["identityHash"] != remote_node_identity(row):
+                if current.get("identityHash") and current["identityHash"] != binding_identity(row, binding):
                     message = "远端入站身份已变化，已停止自动删除，避免误删复用 ID 的节点"
                     current.update(status="identity_changed", invalidatedAt=int(time.time()), error=message)
                     errors.append(message)
@@ -1179,7 +1383,11 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                     continue
                 stored = profile_record(profile_id)["traffic"]
                 try:
-                    reading = metered_counters(row)
+                    if binding.get('scope') == 'user':
+                        from shared_users import counters
+                        reading = counters(row, binding)
+                    else:
+                        reading = metered_counters(row)
                 except ValueError as exc:
                     current['error'] = str(exc); errors.append(str(exc)); continue
                 old_source = current.get('counterSource', 'inbound')
@@ -1240,6 +1448,11 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                         if row is None:
                             raise ValueError("月额度用尽，服务器离线或入站缺失，暂停待重试")
                         sync_monthly_pause(manager, record, binding, row)
+                        continue
+                    if binding.get('scope') == 'user':
+                        manager.subscription_user(binding['serverId'], binding, 'remove')
+                        with LOCK:
+                            binding.update(status='revoked', revokedAt=int(time.time()), error='')
                         continue
                     if rows is None or binding["inboundId"] in rows:
                         manager.delete_inbound(binding["serverId"], binding["inboundId"])
@@ -3684,6 +3897,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out(remote_manager().attach_existing(str(data.get("id", ""))))
             if path == "/admin/api/servers/sni":
                 return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates"), force=data.get("force") is True))
+            if path == "/admin/api/servers/users":
+                self.select_profile()
+                return self.json_out({"ok": True, **provision_subscription_user(data)})
             if path == "/admin/api/servers/import":
                 self.select_profile()
                 return self.json_out({"ok": True, **import_server_inbound(data)})
@@ -3782,12 +3998,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/servers":
                 return self.json_out({"ok": True, "server": save_remote_server(data)})
             if path == "/admin/api/servers/inbounds":
-                for record in load_profiles()["profiles"]:
-                    for binding in record.get("remoteNodes", []):
-                        if binding.get("status") == "active" and (binding["serverId"], binding["inboundId"]) == (str(data.get("serverId", "")), data.get("inboundId")):
-                            if binding.get("identityHash") and binding["identityHash"] != remote_node_identity(data.get("inbound") or {}):
-                                raise ValueError("专属入站的协议、端口或认证配置不能替换，请创建新入站以保持订阅归属")
-                remote_manager().update_inbound(str(data.get("serverId", "")), data.get("inboundId"), data.get("inbound"))
+                with ENFORCEMENT_LOCK:
+                    for record in load_profiles()["profiles"]:
+                        for binding in record.get("remoteNodes", []):
+                            if binding.get("status") == "active" and (binding["serverId"], binding["inboundId"]) == (str(data.get("serverId", "")), data.get("inboundId")):
+                                if binding.get('scope') == 'user':
+                                    from shared_users import find_user
+                                    find_user(data.get('inbound') or {}, binding)
+                                    continue
+                                if binding.get("identityHash") and binding["identityHash"] != remote_node_identity(data.get("inbound") or {}):
+                                    raise ValueError("专属入站的协议、端口或认证配置不能替换，请创建新入站以保持订阅归属")
+                    remote_manager().update_inbound(str(data.get("serverId", "")), data.get("inboundId"), data.get("inbound"))
                 return self.json_out({"ok": True})
             self.select_profile()
             if path == "/admin/api/servers/bandwidth":

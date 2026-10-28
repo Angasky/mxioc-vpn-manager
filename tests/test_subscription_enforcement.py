@@ -148,7 +148,7 @@ class EnforcementTests(unittest.TestCase):
         self.assertEqual(len(server.profile_record()['remoteNodes']), 1)
 
     def test_enforcement_needs_owned_inbound_and_renewal_does_not_recreate(self):
-        with self.assertRaisesRegex(ValueError, '专属'):
+        with self.assertRaisesRegex(ValueError, '独立用户'):
             server.update_traffic({'enforce': True, 'total': 1000})
         record = self.configure(expire=int(time.time()) - 1)
         server.enforce_profile('clash')

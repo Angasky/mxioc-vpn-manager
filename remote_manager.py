@@ -931,6 +931,14 @@ MXIOC_PANEL_READONLY"""
             if not isinstance(rows, list):
                 raise ValueError("3x-ui 入站列表格式无效")
             counts = self.meter_snapshot(record, api.ssh) if record.get("meters") else {}
+            native_stats = None
+            if install_type(record) not in PANEL_TYPES:
+                try:
+                    native_stats = api.user_stats()
+                except ValueError:
+                    # Keep the inbound snapshot available for expiry revocation.
+                    native_stats = None
+
             for row in rows:
                 if row.get("id") in counts:
                     row.update(counts[row["id"]])
@@ -941,6 +949,12 @@ MXIOC_PANEL_READONLY"""
                 for field in ("up", "down"):
                     if type(row.get(field, 0)) is not int or row.get(field, 0) < 0:
                         raise ValueError("3x-ui 流量字段无效")
+                if native_stats is not None:
+                    from shared_users import settings
+                    emails = {c.get('email') for c in settings(row).get('clients', [])}
+                    selected_stats = [entry for entry in native_stats if entry['email'] in emails]
+                    if selected_stats:
+                        row['clientStats'] = selected_stats
                 row["shareLinks"] = []
                 try:
                     row["shareLinks"] = [self.node_uri(n) for n in inbound_nodes(row, record)]
@@ -1254,6 +1268,79 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
             except (ValueError, KeyError, TypeError):
                 pass
             return result
+        return self.with_panel(server_id, action)
+
+    def preflight_user_support(self, server_id):
+        with self.lock:
+            if install_type(self.record(server_id)) in PANEL_TYPES:
+                return
+        return self.with_panel(server_id, lambda api, record: api.check_user_stats_support())
+
+    def prepare_user_meter(self, server_id, inbound_id, email):
+        """Provision only native user counters, never fall back to port counters."""
+        with self.lock:
+            record = self.record(server_id)
+            if str(inbound_id) in record.get('bandwidths', {}):
+                raise ValueError('该入站存在旧版端口限速，请先清除后再迁移或添加用户')
+            if install_type(record) in PANEL_TYPES:
+                return
+        return self.with_panel(server_id, lambda api, record: api.enable_user_stats(email))
+
+    def subscription_user(self, server_id, binding, operation, client=None):
+        """Read/check/mutate in one server operation; preserve every other user."""
+        from shared_users import find_user, settings, user_identity, check_email_namespace
+        def action(api, record):
+            if str(binding['inboundId']) in record.get('bandwidths', {}):
+                raise ValueError('该入站存在端口限速，请先清除旧规则后再使用共用用户')
+            rows = api.request('panel/api/inbounds/list') or []
+            row = next((r for r in rows if r['id'] == binding['inboundId']), None)
+            if row is None:
+                if operation == 'remove':
+                    return {'removed': True}
+                raise ValueError('远端入站不存在')
+            check_email_namespace(rows, binding['userEmail'])
+            current = find_user(row, binding, missing_ok=operation in ('add', 'remove'))
+            model = settings(row)
+            changed = (operation == 'add' and current is None) or (operation == 'remove' and current is not None) or (operation in ('pause', 'resume') and current.get('enable', True) != (operation == 'resume'))
+            if operation == 'add':
+                if user_identity(client) != binding['userHash']:
+                    raise ValueError('待创建用户身份不匹配')
+                if current is None:
+                    field = 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
+                    if not client.get(field) or any(c.get(field) == client[field] for c in model.get('clients', [])):
+                        raise ValueError('认证凭据重复，未添加用户')
+                    model.setdefault('clients', []).append(copy.deepcopy(client))
+            elif operation == 'remove':
+                if current is None:
+                    return {'removed': True}
+                model['clients'] = [c for c in model['clients'] if c.get('email') != binding['userEmail']]
+            elif operation in ('pause', 'resume'):
+                current['enable'] = operation == 'resume'
+                model['clients'] = [current if c.get('email') == binding['userEmail'] else c for c in model['clients']]
+            elif operation != 'read':
+                raise ValueError('用户操作无效')
+            if changed:
+                if install_type(record) in PANEL_TYPES:
+                    # Panel user endpoints mutate one database user and use the
+                    # runtime API where available; never rewrite other users.
+                    payload = {'id': row['id'], 'protocol': row['protocol'],
+                               'settings': json.dumps({'clients': [client if operation == 'add' else current]})}
+                    identity = quote(str((current or client).get('password' if row['protocol'] in ('trojan', 'hysteria2') else 'id', '')), safe='')
+                    if operation == 'add' and current is None:
+                        api.request('panel/api/inbounds/addClient', payload)
+                    elif operation == 'remove':
+                        api.request(f"panel/api/inbounds/{row['id']}/delClient/{identity}", {})
+                    elif operation in ('pause', 'resume'):
+                        api.request('panel/api/inbounds/updateClient/' + identity, payload)
+                else:
+                    body = prepare_inbound({**row, 'settings': model})
+                    api.request('panel/api/inbounds/update/' + str(row['id']), body)
+                row = {**row, 'settings': model}
+            if operation == 'remove':
+                return {'removed': True}
+            # Export exactly the owned user, even while other users are present.
+            selected = {**row, 'settings': {**model, 'clients': [find_user(row, binding)]}}
+            return {'shareLinks': [self.node_uri(n) for n in inbound_nodes(selected, record)]}
         return self.with_panel(server_id, action)
 
     def verified_template_payload(self, record, payload):
