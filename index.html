@@ -2056,13 +2056,13 @@ async function servers() {
 
 function renderServers() {
   const q = S.filters.servers || '';
-  const page = tableSlice(S.servers.filter(s => `${s.name} ${s.host} ${s.domain}`.toLowerCase().includes(q.toLowerCase())), 'servers');
+  const page = tableSlice(S.servers.filter(s => `${s.name} ${s.host} ${s.domain} ${s.nodeAddress || ''}`.toLowerCase().includes(q.toLowerCase())), 'servers');
   $('content').innerHTML = `<section class="panel"><div class="panel-head"><div class="profile-summary"><h3>远端服务器</h3><p class="muted">可选择 3x-ui 面板、独立 Xray 或 sing-box，也可接入现有 X-ui。SSH 账号须为 root 或具有 sudo 权限。</p></div><div class="toolbar"><button class="btn" onclick="serverForm('',true)">接入已有面板 / 内核</button><button class="btn primary" onclick="serverForm()">${uiIcon('circle-plus')}添加服务器</button></div></div>
     <div class="toolbar profiles-toolbar"><input id="search" aria-label="搜索服务器" placeholder="搜索名称、IP 或域名…" value="${esc(q)}"></div>
     <div class="profile-grid">${page.rows.map(s => {
       const id = encodeURIComponent(s.id), url = panelLink(s.panelUrl), running = s.job?.status === 'running';
       return `<article class="profile-card"><div class="profile-card-head"><div><h4>${esc(s.name)}</h4><div class="profile-id">${esc(s.sshUser)}@${esc(s.host)}:${s.sshPort}</div></div><span class="pill ${s.job?.status === 'failed' ? 'reject' : ''}">${s.connectionMode === 'existing' ? (s.existingVerifiedAt ? '已接入' : '待验证') : remoteStatus(s.job?.status)}</span></div>
-      <div class="profile-usage">${s.connectionMode === 'existing' ? (panelType(s.installType) ? '接入现有面板' : '接入已有内核') : s.domain ? '绑定域名：' + esc(s.domain) : '无域名自动安装'}<br>安装类型：${esc(s.installType || '3x-ui')}${panelType(s.installType) ? ' · 面板账号：' + esc(s.panelUser) : ' · 支持模板节点 / 中转'}${s.job ? '<br>阶段：' + esc(remoteStage(s.job.stage)) : ''}</div>
+      <div class="profile-usage">${s.connectionMode === 'existing' ? (panelType(s.installType) ? '接入现有面板' : '接入已有内核') : s.domain ? '绑定域名：' + esc(s.domain) : '无域名自动安装'}<br>节点连接地址：${esc(s.nodeAddress || s.domain || s.host)}<br>安装类型：${esc(s.installType || '3x-ui')}${panelType(s.installType) ? ' · 面板账号：' + esc(s.panelUser) : ' · 支持模板节点 / 中转'}${s.job ? '<br>阶段：' + esc(remoteStage(s.job.stage)) : ''}</div>
       ${s.lastError ? `<div class="error">${esc(s.lastError)}</div>` : ''}
       ${url ? `<a class="btn small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">打开面板 ${uiIcon('chevron-right')}</a><code style="overflow-wrap:anywhere;white-space:normal">${esc(url)}</code>` : ''}
       <div class="toolbar"><button class="btn small primary" onclick="openRemoteNodes('${id}')" ${running ? 'disabled' : ''}>节点 / 中转</button><button class="btn small" onclick="serverForm('${id}')" ${running ? 'disabled' : ''}>连接设置</button><button class="btn small" onclick="openHostMonitor('${id}')">硬件监控</button><button class="btn small" onclick="serverTest('${id}',this)">测试 SSH</button></div>
@@ -2079,6 +2079,7 @@ function serverForm(encoded = '', existing = false) {
   openModal(s.id ? '服务器连接设置' : existing ? '接入已有面板 / 内核' : '添加服务器', `<form id="serverForm"><div class="grid">
     <div><label for="rsName">服务器名称</label><input id="rsName" required maxlength="80" value="${esc(s.name || '')}" placeholder="例如 香港入口"></div>
     <div><label for="rsHost">服务器 IP</label><input id="rsHost" required value="${esc(s.host || '')}" placeholder="IPv4 或 IPv6"></div>
+    <div class="span2"><label for="rsNodeAddress">节点连接地址（可选域名或 IP）</label><input id="rsNodeAddress" value="${esc(s.nodeAddress || '')}" placeholder="${esc(s.domain || s.host || 'node.example.com')}"><p class="hint">留空沿用已绑定域名，未绑定时使用服务器 IP。只填写客户端实际连接的主机名或 IP；面板完整地址和 Reality / TLS SNI 单独设置。修改后新建、导入的节点使用此地址；已有订阅节点需重新导入或编辑地址。</p></div>
     <div><label for="rsPort">SSH 端口</label><input id="rsPort" type="number" min="1" max="65535" required value="${s.sshPort || 22}"></div>
     <div><label for="rsUser">SSH 账号</label><input id="rsUser" required maxlength="64" autocomplete="off" value="${esc(s.sshUser || 'root')}"></div>
     <div class="span2"><label for="rsPassword">SSH 密码${s.id ? '（留空保留）' : ''}</label><input id="rsPassword" type="password" autocomplete="new-password" ${s.id ? '' : 'required'}><p class="hint">非 root 账号会使用此密码执行 sudo。密码加密保存在总面板服务器，不会回显。</p></div>
@@ -2142,7 +2143,7 @@ function serverForm(encoded = '', existing = false) {
     if (!pin || !$('rsTrust').checked) return $('rsError').textContent = '请先检测并核对 SSH 主机指纹';
     $('rsSave').disabled = true;
     const payload = {id:s.id, name:val('rsName'),host:val('rsHost'),sshPort:val('rsPort'),sshUser:val('rsUser'),sshPassword:$('rsPassword').value,
-      installType:val('rsInstallType'),coreConfig:existing ? '' : $('rsCoreConfig').value,clearCoreConfig:!existing && $('rsClearCoreConfig').checked,fingerprint:pin,domain:existing ? (panelType(val('rsInstallType')) ? s.domain || '' : '') : (val('rsMode') === 'domain' ? val('rsDomain') : ''),panelAddress:existing && panelType(val('rsInstallType')) && val('rsMode') === 'url' ? val('rsPanelAddress') : '',panelUser:val('rsPanelUser'),panelPassword:$('rsPanelPassword').value,connectionMode:existing ? 'existing' : 'install'};
+      nodeAddress:val('rsNodeAddress'),installType:val('rsInstallType'),coreConfig:existing ? '' : $('rsCoreConfig').value,clearCoreConfig:!existing && $('rsClearCoreConfig').checked,fingerprint:pin,domain:existing ? (panelType(val('rsInstallType')) ? s.domain || '' : '') : (val('rsMode') === 'domain' ? val('rsDomain') : ''),panelAddress:existing && panelType(val('rsInstallType')) && val('rsMode') === 'url' ? val('rsPanelAddress') : '',panelUser:val('rsPanelUser'),panelPassword:$('rsPanelPassword').value,connectionMode:existing ? 'existing' : 'install'};
     try {
       const saved = await api('/servers', jsonOpt(s.id ? 'PUT' : 'POST', payload));
       s.id = saved.server.id;
@@ -2350,7 +2351,7 @@ async function batchServerImport() {
           if(S.profile===profile && result.traffic)S.data.profile.traffic=result.traffic;
         } catch(error){results.push(...chunk.map(inboundId=>({inboundId,ok:false,error:error.message+'；结果未确认，重试会核对已有用户'})));}
         if(!form.isConnected)break;
-        $('batchServerResults').innerHTML=results.map(item=>`<p class="${item.ok ? 'hint' : 'error'}">入站 ${esc(item.inboundId)}：${item.ok ? (item.existing ? '已存在，复用专属用户' : '已导入并绑定专属用户') : esc(item.error || '失败')}</p>`).join('');
+        $('batchServerResults').innerHTML=results.map(item=>`<p class="${item.ok ? 'hint' : 'error'}">入站 ${esc(item.inboundId)}：${item.ok ? (item.existing ? '已存在，复用专属用户' : '已导入并绑定专属用户') : esc(item.error || '失败')}${item.warning ? ' · '+esc(item.warning) : ''}</p>`).join('');
       }
       if(!form.isConnected)return;
       const success=results.filter(r=>r.ok).length;
@@ -2701,10 +2702,10 @@ function remoteNodeLinks(id) {
     try {
       if (S.profile !== profile) throw Error('订阅已切换，请重新打开窗口');
       const options = jsonOpt('POST', {serverId, inboundId:id}); options.headers['X-Profile'] = profile;
-      await api('/servers/users', options);
+      const result = await api('/servers/users', options);
       closeModal(); S.remoteLoaded = false;
       if (S.profile === profile) { await reload(false); if (S.page === 'serverNodes') await serverNodes(true); }
-      notice('独立用户已绑定，流量与有效期请在订阅中设置');
+      notice('独立用户已绑定，流量与有效期请在订阅中设置'+(result.runtimeRepaired ? '；已补同步运行内核' : result.runtimeVerified === null ? '；此内核不支持运行用户核验，请测试连接' : ''));
     } catch (error) { if ($('sharedUserError')) $('sharedUserError').textContent = error.message; }
     finally { if (button.isConnected) button.disabled = false; }
   };

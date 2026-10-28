@@ -68,6 +68,9 @@ class SharedUsersNativeTests(unittest.TestCase):
                  'userStats':{'listen':f'127.0.0.1:{stats_port}','binary':binary,'users':['owned-one','owned-two']}}
         api.apply(copy.deepcopy(state))
         native = copy.deepcopy(self.native)
+        native['api']['services'].append('HandlerService')
+        # X-Panel may persist both users while only the first is live.
+        native['inbounds'][0]['settings']['clients'] = native['inbounds'][0]['settings']['clients'][:1]
         native['outbounds'][0]['settings'] = {'finalRules':[{'action':'allow','ip':['127.0.0.0/8']}]}
         # Real binary validates the exact configuration emitted by CoreAPI.
         check = Path(self.temp.name)/'check.json'; check.write_text(json.dumps(native))
@@ -102,6 +105,22 @@ class SharedUsersNativeTests(unittest.TestCase):
         self.assertGreater(entries['user>>>owned-one>>>traffic>>>uplink'],0)
         self.assertEqual(entries.get('user>>>owned-two>>>traffic>>>uplink',0),0)
         self.assertEqual(entries.get('user>>>owned-two>>>traffic>>>downlink',0),0)
+        # Exercise the real single-user hot-add recovery used for X-Panel.
+        import panel_user_runtime
+        from unittest.mock import patch
+        runtime_manager = Mock()
+        def local_execute(ssh, record, script, **kwargs):
+            result = subprocess.run(['bash','-c',script],capture_output=True,text=True,timeout=kwargs.get('timeout',15))
+            return result.returncode,result.stdout+result.stderr
+        runtime_manager.execute.side_effect=local_execute
+        panel=Mock();panel.request.return_value=native
+        with patch('panel_user_runtime.BINARIES',(binary,)):
+            outcome=panel_user_runtime.sync_user(runtime_manager,panel,record,row,clients[1])
+            self.assertEqual(outcome,{'runtimeVerified':True,'runtimeRepaired':True})
+            self.assertEqual(panel_user_runtime.sync_user(runtime_manager,panel,record,row,clients[1]),
+                             {'runtimeVerified':True,'runtimeRepaired':False})
+        self.assertIn(b'mxioc-shared-authentication-ok',self.fetch(second_proxy,target.server_port))
+        self.assertIn(b'mxioc-shared-authentication-ok',self.fetch(first_proxy,target.server_port))
         # Apply the adapter's user-disable conversion. Peer keeps the same port
         # and UUID; the old user's new authentication attempts must fail.
         state['inbounds'][0]['settings']['clients'][0]['enable']=False

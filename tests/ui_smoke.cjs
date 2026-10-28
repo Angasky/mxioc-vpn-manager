@@ -36,7 +36,8 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
  assert.equal(JSON.parse(existingRequest[1].body).installType,'xray');assert.equal(JSON.parse(existingRequest[1].body).coreConfig,'');
  assert(requests.some(r=>r[0]==='/servers/attach'));assert(!requests.some(r=>r[0]==='/servers/install'));
  t.S.servers.push({id:'xp',name:'X-Panel',host:'198.51.100.3',installType:'x-panel',connectionMode:'existing',panelUser:'admin'});
- t.serverForm('xp');assert.equal($('rsInstallType').value,'x-panel');assert(!$('rsPanelPassword').disabled);
+ t.S.servers.find(s=>s.id==='xp').nodeAddress='proxy.example.com';
+ t.serverForm('xp');assert.equal($('rsNodeAddress').value,'proxy.example.com');assert.equal($('rsInstallType').value,'x-panel');assert(!$('rsPanelPassword').disabled);
  assert($('rsPanelUserLabel').textContent.includes('X-Panel'));assert($('rsPanelPasswordLabel').textContent.includes('X-Panel'));
  $('rsMode').value='url';$('rsMode').onchange();assert(!$('rsPanelAddressBox').classList.contains('hidden'));
  assert($('rsDomainBox').classList.contains('hidden'));assert(!$('rsDomain').required);
@@ -45,7 +46,7 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
  t.serverForm('xp');$('rsMode').value='url';$('rsMode').onchange();$('rsPanelAddress').value='https://panel.example.com:13145/riben/';
  await $('serverForm').onsubmit({preventDefault(){}});
  const xpRequest=requests.filter(r=>r[0]==='/servers' && r[1]?.method==='PUT').map(r=>JSON.parse(r[1].body)).find(r=>r.id==='xp');
- assert.equal(xpRequest.panelAddress,'https://panel.example.com:13145/riben/');assert.equal(xpRequest.domain,'');
+ assert.equal(xpRequest.nodeAddress,'proxy.example.com');assert.equal(xpRequest.panelAddress,'https://panel.example.com:13145/riben/');assert.equal(xpRequest.domain,'');
 
  t.S.page='servers';t.renderServers();const manage=[...w.document.querySelectorAll('button')].filter(b=>b.textContent==='节点 / 中转');assert(manage.every(b=>!b.disabled));
  t.S.page='chains';await t.chainModal();$('chainMode').value='server';$('chainMode').onchange();assert(!$('chainServerFields').classList.contains('hidden'));

@@ -67,7 +67,16 @@ def new_user(row):
     if protocol == 'vless':
         stream = row.get('streamSettings') or {}
         stream = json.loads(stream) if isinstance(stream, str) else stream
-        if stream.get('security') == 'reality' and stream.get('network', 'tcp') in ('tcp', 'raw'):
+        clients = [c for c in settings(row).get('clients', []) if c.get('enable') is not False]
+        if clients:
+            # Preserve the existing inbound's working user transport mode; a
+            # fresh UUID must not silently turn ordinary VLESS into Vision.
+            flow = clients[0].get('flow') or ''
+            if flow not in ('', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443'):
+                raise ValueError('现有用户使用未支持的 VLESS flow，不能自动生成兼容用户')
+            if flow:
+                user['flow'] = flow
+        elif stream.get('security') == 'reality' and stream.get('network', 'tcp') in ('tcp', 'raw'):
             user['flow'] = 'xtls-rprx-vision'
     return user
 

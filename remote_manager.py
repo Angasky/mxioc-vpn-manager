@@ -65,6 +65,22 @@ def valid_domain(value):
     return value
 
 
+def valid_node_address(value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    try:
+        ipaddress.ip_address(value.strip('[]'))
+    except ValueError:
+        return valid_domain(value)
+    return valid_ip(value)
+
+
+def node_address(record):
+    """Client endpoint is independent of SSH IP, panel URL and TLS SNI."""
+    return valid_node_address(record.get('nodeAddress') or record.get('domain') or record['host'])
+
+
 def parse_panel_address(value):
     value = text(value, "面板完整地址", maximum=2048).strip()
     if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value) or "\\" in value:
@@ -481,7 +497,7 @@ class RemoteManager:
         return item
 
     def public(self, record):
-        keys = ("id", "name", "host", "sshPort", "sshUser", "fingerprint", "domain", "panelUser",
+        keys = ("id", "name", "host", "sshPort", "sshUser", "fingerprint", "domain", "nodeAddress", "panelUser",
                 "panelAddress", "panelUrl", "panelPort", "panelPath", "panelTLS", "createdAt", "lastError", "connectionMode", "existingVerifiedAt")
         result = {key: record.get(key) for key in keys}
         result["installType"] = install_type(record)
@@ -553,7 +569,8 @@ class RemoteManager:
             for key, value in {"host": valid_ip(payload.get("host")), "sshPort": valid_port(payload.get("sshPort", 22)),
                                "name": text(payload.get("name"), "服务器名称", maximum=80),
                                "sshUser": text(payload.get("sshUser"), "SSH 用户名", maximum=64),
-                               "domain": valid_domain(payload.get("domain")),
+                               "domain": valid_domain(payload.get("domain", record.get("domain"))),
+                               "nodeAddress": valid_node_address(payload.get("nodeAddress", record.get("nodeAddress"))),
                                "panelUser": text(payload.get("panelUser") if kind in PANEL_TYPES else "unused", "面板用户名", 1 if record["connectionMode"] == "existing" else 3, 64)}.items():
                 record[key] = value
             pin = str(payload.get("fingerprint", ""))
@@ -1338,9 +1355,14 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                 row = {**row, 'settings': model}
             if operation == 'remove':
                 return {'removed': True}
+            runtime = {}
+            owned = find_user(row, binding)
+            if install_type(record) == 'x-panel' and operation == 'read' and owned.get('enable') is not False:
+                from panel_user_runtime import sync_user
+                runtime = sync_user(self, api, record, row, owned)
             # Export exactly the owned user, even while other users are present.
             selected = {**row, 'settings': {**model, 'clients': [find_user(row, binding)]}}
-            return {'shareLinks': [self.node_uri(n) for n in inbound_nodes(selected, record)]}
+            return {'shareLinks': [self.node_uri(n) for n in inbound_nodes(selected, record)], **runtime}
         return self.with_panel(server_id, action)
 
     def verified_template_payload(self, record, payload):
@@ -1562,7 +1584,7 @@ def inbound_nodes(inbound, record):
     settings = json_object(inbound.get("settings", {}))
     stream = json_object(inbound.get("streamSettings", {}))
     protocol = inbound.get("protocol")
-    base = {"name": inbound.get("remark") or "3x-ui 节点", "server": record["host"], "port": inbound["port"]}
+    base = {"name": inbound.get("remark") or "3x-ui 节点", "server": node_address(record), "port": inbound["port"]}
     if protocol in ("socks", "http"):
         accounts = settings.get("accounts", []) or [{}]
         return [{**base, "type": "socks5" if protocol == "socks" else "http",
@@ -1585,6 +1607,8 @@ def inbound_nodes(inbound, record):
         if client.get("flow"):
             node["flow"] = client["flow"]
         network = stream.get("network", "tcp")
+        if network == "raw":
+            network = "tcp"  # Xray RAW is TCP; Mihomo does not use the RAW alias.
         if network != "tcp":
             node["network"] = network
         if network == "ws":

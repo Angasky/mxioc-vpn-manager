@@ -1195,6 +1195,10 @@ def batch_subscription_users(payload):
                 _enable_batch_user_enforcement(record)
                 result = _provision_user_at_inbound(record, manager, server_id, row, None)
                 item.update(ok=True, added=result['added'], existing=result['existing'])
+                if result.get('runtimeVerified', True) is None:
+                    item['warning'] = '此 X-Panel 内核不支持运行用户核验，请测试客户端连接'
+                elif result.get('runtimeRepaired'):
+                    item['warning'] = '已补同步到运行内核'
             except Exception as exc:
                 item.update(ok=False, error=str(exc)[:500])
             results.append(item)
@@ -1271,20 +1275,27 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
                     raise
             try:
                 manager.subscription_user(server_id, binding, 'add', client)
-            except Exception:
-                binding['error'] = '用户创建结果待核对，请重试添加；总控已保留身份记录'
+            except Exception as exc:
+                detail = str(exc)
+                binding['error'] = detail if detail.startswith(('X-Panel ', '无法连接 X-Panel ')) else '用户创建结果待核对，请重试添加；总控已保留身份记录'
                 save_profiles(load_profiles())
                 raise ValueError(binding['error']) from None
             with LOCK:
                 binding.update(status='active', error='')
                 save_profiles(load_profiles())
     try:
-        links = manager.subscription_user(server_id, binding, 'read')['shareLinks']
+        runtime_result = manager.subscription_user(server_id, binding, 'read')
+        links = runtime_result['shareLinks']
         result = import_owned_user_links(record, binding, links)
-    except Exception:
-        raise ValueError('独立用户绑定已保留，但订阅导入未完成；请在同一入站重试添加，不要重新创建入站') from None
+    except Exception as exc:
+        detail = str(exc)
+        message = '独立用户绑定已保留，但订阅导入未完成；请在同一入站重试添加，不要重新创建入站'
+        if detail.startswith(('X-Panel ', '无法连接 X-Panel ')):
+            message += '：' + detail
+        raise ValueError(message) from None
     ENFORCEMENT_WAKE.set()
-    return {**result, 'binding': copy.deepcopy(binding), 'inbound': row, 'shareLinks': links}
+    return {**result, 'binding': copy.deepcopy(binding), 'inbound': row, 'shareLinks': links,
+            **{key: runtime_result[key] for key in ('runtimeVerified', 'runtimeRepaired') if key in runtime_result}}
 
 
 def set_node_bandwidth(payload):
@@ -1628,7 +1639,8 @@ def server_chain(payload):
         servers = remote_manager().list()
         def match(node):
             found = [s for s in servers if str(node.get("server", "")).strip('[]').lower() in
-                     {str(s["host"]).lower(), str(s.get("domain") or "").lower()}]
+                     {str(s["host"]).lower(), str(s.get("domain") or "").lower(),
+                      str(s.get("nodeAddress") or "").strip("[]").lower()}]
             if len(found) != 1:
                 raise ValueError("节点未唯一匹配总控中的服务器，请选择 Mihomo 客户端专用链式代理模式")
             return found[0]
@@ -1734,7 +1746,8 @@ def create_failover(payload):
         for node_name in entries + [exit_name]:
             node = nodes[node_name]
             matches = [s for s in servers if str(node["server"]).strip("[]").lower() in
-                       {str(s["host"]).lower(), str(s.get("domain") or "").lower()}]
+                       {str(s["host"]).lower(), str(s.get("domain") or "").lower(),
+                      str(s.get("nodeAddress") or "").strip("[]").lower()}]
             if len(matches) != 1:
                 raise ValueError("节点未唯一匹配总控中的服务器，请选择 Mihomo 客户端专用链式代理模式")
             hosts.append(matches[0]["id"])
