@@ -830,6 +830,9 @@ code {
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
+.batch-server-group { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.batch-server-group h4 { margin: 0 0 8px; overflow-wrap: anywhere; }
+.batch-choice-text { min-width: 0; overflow-wrap: anywhere; }
 .checks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2268,100 +2271,155 @@ async function batchServerImport() {
   const profile = S.profile;
   openModal('从服务器批量导入节点', `<form id="batchServerForm">
     <p>当前订阅：${esc(S.data?.profile?.name || '')}</p>
-    <p class="hint">勾选服务器入站，为当前订阅分别生成独立 UUID / 密码。重复导入复用已有用户，不另开端口。导入后自动启用流量统计和到期限制，沿用当前订阅额度、倍率和到期时间，不清零或续期。</p>
+    <p class="hint">可多选服务器，下方按服务器展示全部入站。勾选节点后，为当前订阅分配独立 UUID / 密码，沿用额度、倍率和到期时间，不清零或续期。</p>
     <p id="batchSubscriptionInfo" class="hint"></p>
-    <label for="batchServerSelect">服务器</label><select id="batchServerSelect" disabled><option>正在读取服务器…</option></select>
-    <button id="batchServerLoad" type="button" class="btn" disabled>加载服务器入站</button>
+    <h4>服务器（可多选）</h4><label class="inlinecheck"><input id="batchServersAll" type="checkbox" disabled>全选服务器</label>
+    <div id="batchServerSelect" class="checks" role="group" aria-label="选择服务器">正在读取服务器…</div>
+    <button id="batchServerLoad" type="button" class="btn" disabled>刷新所选服务器节点</button>
+    <p class="hint">勾选服务器后自动加载；最多同时读取 3 台服务器。一次最多导入 50 个节点。</p>
+    <label class="inlinecheck"><input id="batchServerAll" type="checkbox" disabled>全选已加载的可用入站（最多 50 个）</label><button id="batchNodesClear" type="button" class="btn small" disabled>取消节点选择</button>
     <div id="batchServerRows"></div><div id="batchServerError" class="error" role="alert"></div>
     <p id="batchServerProgress" role="status" aria-live="polite"></p><div id="batchServerResults"></div>
     <button id="batchServerSubmit" class="btn primary" disabled>导入所选节点并绑定订阅</button></form>`);
-  const form = $('batchServerForm');
-  let rows = [], loadedServer = '', busy = false, generation = 0;
-  const selected = new Set();
+  const form = $('batchServerForm'), groups = new Map(), selectedServers = new Set(), selected = new Set(), queue = [];
+  let busy = false, activeLoads = 0;
+  const key = (serverId, inboundId) => JSON.stringify([serverId, inboundId]);
+  const eligible = row => ['vless','vmess','trojan','hysteria2','tuic'].includes(row.protocol) && row.enable !== false;
   const t = S.data?.profile?.traffic || {};
   $('batchSubscriptionInfo').textContent = `总额度：${t.total == null ? '不限' : formatBytes(t.total)} · 到期：${t.expire ? new Date(t.expire*1000).toLocaleString('zh-CN') : '长期有效'}。未设置额度或日期时，导入后先统计用量，可在“流量与有效期”继续设置。`;
-  const eligible = row => ['vless','vmess','trojan','hysteria2','tuic'].includes(row.protocol) && row.enable !== false;
+  const selectable = group => group.status === 'loaded' ? group.rows.filter(eligible) : [];
   const update = () => {
     if (!form.isConnected) return;
-    $('batchServerSubmit').disabled = busy || !selected.size || loadedServer !== val('batchServerSelect');
+    const available = [...selectedServers].flatMap(id=>selectable(groups.get(id)).map(row=>key(id,row.id)));
+    $('batchServerSubmit').disabled = busy || !selected.size;
     $('batchServerSubmit').textContent = busy ? '正在导入…' : `导入所选 ${selected.size} 个节点并绑定订阅`;
+    $('batchServerLoad').disabled = busy || !selectedServers.size;
+    $('batchServersAll').disabled = busy || !groups.size;
+    $('batchServersAll').checked = !!groups.size && selectedServers.size === groups.size;
+    $('batchServersAll').indeterminate = !!selectedServers.size && selectedServers.size < groups.size;
+    $('batchServerAll').disabled = busy || !available.length;
+    $('batchNodesClear').disabled = busy || !selected.size;
+    $('batchServerAll').checked = !!available.length && available.every(k=>selected.has(k));
+    $('batchServerAll').indeterminate = selected.size > 0 && !$('batchServerAll').checked;
+    form.querySelectorAll('.batchServerSource').forEach(n=>{n.checked=selectedServers.has(n.value);n.disabled=busy;});
+    form.querySelectorAll('.batchServerChoice').forEach(n=>{n.checked=selected.has(n.value);n.disabled=busy || n.hasAttribute('data-unsupported');});
+    form.querySelectorAll('[data-batch-group-all]').forEach(n=>{
+      const group=groups.get(n.dataset.batchGroupAll), keys=selectable(group).map(row=>key(group.server.id,row.id));
+      n.disabled=busy || !keys.length;n.checked=!!keys.length && keys.every(k=>selected.has(k));
+      n.indeterminate=keys.some(k=>selected.has(k)) && !n.checked;
+    });
+    form.querySelectorAll('[data-batch-reload]').forEach(n=>{n.disabled=busy || ['queued','loading'].includes(groups.get(n.dataset.batchReload).status);});
   };
-  const lock = value => {
-    busy=value;
-    form.querySelectorAll('input,select,button').forEach(n=>n.disabled=value);
-    if (!value) {
-      form.querySelectorAll('input[data-unsupported]').forEach(n=>n.disabled=true);
-      $('batchServerLoad').disabled=!val('batchServerSelect');
-      update();
+  const renderGroups = () => {
+    if (!form.isConnected) return;
+    const scroll = new Map([...form.querySelectorAll('[data-batch-node-list]')].map(n=>[n.dataset.batchNodeList,n.scrollTop]));
+    $('batchServerRows').innerHTML = [...groups.values()].filter(g=>selectedServers.has(g.server.id)).map(group=>{
+      const {server,rows,status,error}=group;
+      return `<section class="batch-server-group" data-batch-server-group="${esc(server.id)}"><h4>${esc(server.name)} · ${esc(server.host)}</h4>
+        ${status === 'loading' || status === 'queued' ? `<p class="hint">${status === 'loading' ? '正在加载节点…' : '等待加载…'}</p>` : status === 'error' ? `<p class="error">${esc(error)}</p>` : `<p class="hint">共 ${rows.length} 个入站</p>
+        <label class="inlinecheck"><input type="checkbox" data-batch-group-all="${esc(server.id)}">全选此服务器可用入站</label>
+        <div class="checks" data-batch-node-list="${esc(server.id)}">${rows.map(row=>`<label class="choice"><input type="checkbox" class="batchServerChoice" value="${esc(key(server.id,row.id))}" ${eligible(row) ? '' : 'disabled data-unsupported="true"'}><span class="batch-choice-text">${esc(row.remark || '未命名')} · ${esc(row.protocol)} : ${esc(row.port)}${eligible(row) ? '' : row.enable === false ? '（入站已停用）' : '（不支持独立用户）'}</span></label>`).join('') || '<p class="hint">此服务器暂无入站。</p>'}</div>`}
+        <button type="button" class="btn small" data-batch-reload="${esc(server.id)}">${status === 'error' ? '重试加载' : '刷新节点'}</button></section>`;
+    }).join('') || '<p class="hint">请勾选上方服务器，节点会在此处分组显示。独立内核仅展示总控受管入站。</p>';
+    form.querySelectorAll('[data-batch-node-list]').forEach(n=>n.scrollTop=scroll.get(n.dataset.batchNodeList)||0);
+    update();
+  };
+  const pump = () => {
+    if (!form.isConnected || S.profile !== profile || busy) return;
+    while(activeLoads<3 && queue.length){
+      const group=queue.shift();
+      if(!selectedServers.has(group.server.id)){group.status='idle';continue;}
+      activeLoads++;group.status='loading';renderGroups();
+      void api('/servers/inbounds?id='+encodeURIComponent(group.server.id)).then(result=>{
+        group.rows=result.inbounds || [];group.status='loaded';group.error='';
+      }).catch(error=>{group.status='error';group.error=error.message;}).finally(()=>{
+        activeLoads--;renderGroups();pump();
+      });
     }
   };
+  const load = (id, refresh=false) => {
+    const group=groups.get(id);
+    if(!group || ['queued','loading'].includes(group.status))return;
+    if(group.status==='loaded' && !refresh)return;
+    for(const row of group.rows)selected.delete(key(id,row.id));
+    group.rows=[];group.status='queued';group.error='';queue.push(group);renderGroups();pump();
+  };
+  const chooseServer = (id, checked) => {
+    if(checked){selectedServers.add(id);load(id);}
+    else {selectedServers.delete(id);for(const row of groups.get(id).rows)selected.delete(key(id,row.id));}
+    renderGroups();
+  };
+  const chooseNodes = (keys, checked) => {
+    for(const id of keys){
+      if(!checked)selected.delete(id);
+      else if(selected.size<50)selected.add(id);
+    }
+    if(checked && keys.some(id=>!selected.has(id)))$('batchServerError').textContent='跨服务器一次最多选择 50 个入站';
+    else $('batchServerError').textContent='';
+    update();
+  };
+  $('batchServerSelect').onchange = event=>{
+    if(busy || !event.target.matches('.batchServerSource'))return;
+    chooseServer(event.target.value,event.target.checked);
+  };
+  $('batchServersAll').onchange=()=>{
+    const checked=$('batchServersAll').checked;
+    for(const id of groups.keys())chooseServer(id,checked);
+    update();
+  };
+  $('batchServerLoad').onclick=()=>{if(!busy)for(const id of selectedServers)load(id,true);};
+  $('batchNodesClear').onclick=()=>{if(!busy){selected.clear();update();}};
+  $('batchServerAll').onchange=()=>chooseNodes([...selectedServers].flatMap(id=>selectable(groups.get(id)).map(row=>key(id,row.id))),$('batchServerAll').checked);
+  $('batchServerRows').onchange=event=>{
+    if(busy)return;
+    const input=event.target;
+    if(input.matches('.batchServerChoice'))chooseNodes([input.value],input.checked);
+    else if(input.hasAttribute('data-batch-group-all')){
+      const id=input.dataset.batchGroupAll;chooseNodes(selectable(groups.get(id)).map(row=>key(id,row.id)),input.checked);
+    }
+  };
+  $('batchServerRows').onclick=event=>{
+    const button=event.target.closest('[data-batch-reload]');if(button && !busy)load(button.dataset.batchReload,true);
+  };
   try {
-    const data = await api('/servers');
-    if (!form.isConnected || S.profile !== profile) return;
-    const servers = (data.servers || []).filter(s=>s.job?.status !== 'running');
-    $('batchServerSelect').innerHTML = servers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.host)} · ${esc(s.installType || '3x-ui')}</option>`).join('');
-    $('batchServerSelect').disabled = !servers.length; $('batchServerLoad').disabled=!servers.length;
-    if (!servers.length) $('batchServerError').textContent='暂无可用服务器，请先在服务器管理添加并验证服务器。';
-  } catch (error) { if (form.isConnected) $('batchServerError').textContent=error.message; }
-  if (!form.isConnected) return;
-  $('batchServerSelect').onchange = () => {
-    generation++; loadedServer=''; rows=[]; selected.clear(); $('batchServerRows').innerHTML=''; $('batchServerResults').innerHTML=''; $('batchServerProgress').textContent=''; $('batchServerError').textContent=''; update();
-  };
-  $('batchServerLoad').onclick = async () => {
-    const serverId=val('batchServerSelect'), ticket=++generation;
-    if (!serverId || busy) return;
-    lock(true); $('batchServerError').textContent=''; $('batchServerProgress').textContent='正在读取该服务器入站…';
-    try {
-      const data = await api('/servers/inbounds?id='+encodeURIComponent(serverId));
-      if (!form.isConnected || ticket !== generation || S.profile !== profile) return;
-      rows=data.inbounds || [];loadedServer=serverId;selected.clear();
-      $('batchServerRows').innerHTML=`<p class="hint">一次最多选择 50 个。只为选中入站分配用户，不导入其他用户的凭据。独立内核仅列出总控受管入站。</p>
-        <label class="inlinecheck"><input id="batchServerAll" type="checkbox">全选可用入站（最多 50 个）</label>
-        <div class="checks">${rows.map(row=>`<label class="choice"><input type="checkbox" class="batchServerChoice" value="${row.id}" ${eligible(row) ? '' : 'disabled data-unsupported="true"'}><span>${esc(row.remark || '未命名')} · ${esc(row.protocol)} : ${row.port}${eligible(row) ? '' : row.enable === false ? '（入站已停用）' : '（不支持独立用户）'}</span></label>`).join('') || '<p class="hint">该服务器没有可导入的入站。</p>'}</div>`;
-      form.querySelectorAll('.batchServerChoice').forEach(input=>input.onchange=()=>{
-        if (input.checked && selected.size>=50) {input.checked=false;$('batchServerError').textContent='一次最多选择 50 个入站';return;}
-        if(input.checked)selected.add(Number(input.value));else selected.delete(Number(input.value));
-        $('batchServerAll').checked=false;update();
-      });
-      $('batchServerAll').onchange=()=>{
-        selected.clear();const all=$('batchServerAll').checked;
-        form.querySelectorAll('.batchServerChoice:not([data-unsupported])').forEach(input=>{input.checked=all&&selected.size<50;if(input.checked)selected.add(Number(input.value));});update();
-      };
-      $('batchServerProgress').textContent=`已读取 ${rows.length} 个入站，请勾选需要导入的节点。`;
-    } catch(error) {if(form.isConnected)$('batchServerError').textContent=error.message;}
-    finally {if(form.isConnected && ticket === generation)lock(false);}
-  };
+    const data=await api('/servers');
+    if(!form.isConnected || S.profile!==profile)return;
+    for(const server of data.servers || [])if(server.job?.status!=='running')groups.set(server.id,{server,rows:[],status:'idle',error:''});
+    $('batchServerSelect').innerHTML=[...groups.values()].map(({server})=>`<label class="choice"><input type="checkbox" class="batchServerSource" value="${esc(server.id)}"><span class="batch-choice-text">${esc(server.name)} · ${esc(server.host)} · ${esc(server.installType || '3x-ui')}</span></label>`).join('') || '<p class="hint">暂无可用服务器，请先添加并验证服务器。</p>';
+    renderGroups();
+  }catch(error){if(form.isConnected)$('batchServerError').textContent=error.message;}
   form.onsubmit=async event=>{
-    event.preventDefault(); if(busy || !selected.size)return;
+    event.preventDefault();if(busy || !selected.size)return;
     if(S.profile!==profile){$('batchServerError').textContent='订阅已切换，请关闭窗口后重新导入';return;}
-    const serverId=loadedServer, ids=[...selected];
-    if(serverId!==val('batchServerSelect'))return;
-    lock(true);$('batchServerError').textContent='';$('batchServerResults').innerHTML='';
-    const results=[];
-    try {
-      // Small batches expose progress and bound each HTTP request. Every retry
-      // uses the same subscription/inbound identity; no blind UUID recreation.
-      for(let offset=0;offset<ids.length;offset+=3){
+    const tasks=[];
+    for(const id of selectedServers){
+      const ids=selectable(groups.get(id)).filter(row=>selected.has(key(id,row.id))).map(row=>row.id);
+      for(let offset=0;offset<ids.length;offset+=3)tasks.push({serverId:id,ids:ids.slice(offset,offset+3)});
+    }
+    const total=tasks.reduce((sum,task)=>sum+task.ids.length,0),results=[];
+    if(!total)return;
+    busy=true;update();$('batchServerError').textContent='';$('batchServerResults').innerHTML='';
+    try{
+      for(const task of tasks){
         if(S.profile!==profile || !form.isConnected)break;
-        $('batchServerProgress').textContent=`正在处理 ${offset+1}–${Math.min(offset+3,ids.length)} / ${ids.length}，请勿重复提交…`;
-        const chunk=ids.slice(offset,offset+3), options=jsonOpt('POST',{serverId,inboundIds:chunk});options.headers['X-Profile']=profile;
-        try {
-          const result=await api('/servers/users/batch',options);
-          results.push(...result.results);
-          if(S.profile===profile && result.traffic)S.data.profile.traffic=result.traffic;
-        } catch(error){results.push(...chunk.map(inboundId=>({inboundId,ok:false,error:error.message+'；结果未确认，重试会核对已有用户'})));}
+        const server=groups.get(task.serverId).server;
+        $('batchServerProgress').textContent=`${server.name}：正在处理 ${results.length+1}–${results.length+task.ids.length} / ${total}，请勿重复提交…`;
+        const options=jsonOpt('POST',{serverId:task.serverId,inboundIds:task.ids});options.headers['X-Profile']=profile;
+        try{
+          const response=await api('/servers/users/batch',options);
+          for(const inboundId of task.ids){const item=response.results?.find(r=>r.inboundId===inboundId);results.push({...item,inboundId,ok:!!item?.ok,error:item?.error || (!item ? '服务器未返回此项结果，请重试核对' : ''),serverId:task.serverId,serverName:server.name});}
+          if(S.profile===profile && S.data?.profile && response.traffic)S.data.profile.traffic=response.traffic;
+        }catch(error){results.push(...task.ids.map(inboundId=>({serverId:task.serverId,serverName:server.name,inboundId,ok:false,error:error.message+'；结果未确认，重试会核对已有用户'})));}
         if(!form.isConnected)break;
-        $('batchServerResults').innerHTML=results.map(item=>`<p class="${item.ok ? 'hint' : 'error'}">入站 ${esc(item.inboundId)}：${item.ok ? (item.existing ? '已存在，复用专属用户' : '已导入并绑定专属用户') : esc(item.error || '失败')}${item.warning ? ' · '+esc(item.warning) : ''}</p>`).join('');
+        $('batchServerResults').innerHTML=results.map(item=>`<p class="${item.ok ? 'hint' : 'error'}">${esc(item.serverName)} · 入站 ${esc(item.inboundId)}：${item.ok ? (item.existing ? '已存在，复用专属用户' : '已导入并绑定专属用户') : esc(item.error)}${item.warning ? ' · '+esc(item.warning) : ''}</p>`).join('');
       }
       if(!form.isConnected)return;
-      const success=results.filter(r=>r.ok).length;
-      $('batchServerProgress').textContent=`已处理 ${results.length} / ${ids.length}，成功 ${success}，失败 ${results.length-success}。成功项已保存；失败或待核对项可重试。`;
-      for(const item of results)if(item.ok)selected.delete(item.inboundId);
-      $('batchServerAll').checked=false;
-      form.querySelectorAll('.batchServerChoice').forEach(n=>n.checked=selected.has(Number(n.value)));
+      const success=results.filter(item=>item.ok).length;
+      $('batchServerProgress').textContent=`已处理 ${results.length} / ${total}，成功 ${success}，失败 ${results.length-success}。成功项已保存；失败或待核对项可重试。`;
+      for(const item of results)if(item.ok)selected.delete(key(item.serverId,item.inboundId));
       if(S.profile===profile)await reload(false);
     }catch(error){if(form.isConnected)$('batchServerError').textContent=error.message;}
-    finally{if(form.isConnected)lock(false);}
+    finally{busy=false;update();pump();}
   };
 }
 
