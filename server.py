@@ -1125,6 +1125,86 @@ def provision_subscription_user(payload):
             raise
 
 
+def _enable_batch_user_enforcement(record):
+    """Persist subscription protection before granting any remote UUID."""
+    with LOCK:
+        previous = record.get('traffic')
+        if (previous or {}).get('enabled') and (previous or {}).get('enforce'):
+            return
+        stored = dict(previous or {})
+        stored.update(enabled=True, enforce=True, updatedAt=int(time.time()))
+        for key, value in {'upload': 0, 'download': 0, 'total': None, 'expire': None,
+                           'rawUpload': 0, 'rawDownload': 0, 'multiplierUnits': 1000}.items():
+            stored.setdefault(key, value)
+        record['traffic'] = stored
+        try:
+            save_profiles(load_profiles())
+        except Exception:
+            if previous is None:
+                record.pop('traffic', None)
+            else:
+                record['traffic'] = previous
+            raise ValueError('订阅限制设置保存失败，未创建远端用户，请修复存储后重试') from None
+    ENFORCEMENT_WAKE.set()
+
+
+def batch_subscription_users(payload):
+    """Import selected live inbounds; partial success is durable and retryable."""
+    from remote_manager import positive_id
+    from shared_users import PROTOCOLS
+    server_id, ids = payload.get('serverId'), payload.get('inboundIds')
+    if not isinstance(server_id, str) or not server_id.strip():
+        raise ValueError('请选择服务器')
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= 50 or
+            any(type(i) is not int or i <= 0 for i in ids) or len(set(ids)) != len(ids)):
+        raise ValueError('请选择 1–50 个不重复的有效入站 ID')
+    ids = [positive_id(i) for i in ids]
+    with ENFORCEMENT_LOCK:
+        record = profile_record()
+        info = traffic_info({**record, 'traffic': {**(record.get('traffic') or {}), 'enabled': True}})
+        if record.get('accessRevoked') or info.get('expired') or info.get('exhausted'):
+            raise ValueError('订阅已到期或流量用尽，请先续期或调整额度；批量导入不会重置用量或续期')
+        if (record.get('traffic') or {}).get('speedMbps'):
+            raise ValueError('共用入站暂不支持按用户限速，请先选择不限速套餐')
+        previous = record.get('traffic') or {}
+        if not (previous.get('enabled') and previous.get('enforce')) and any(
+                b.get('scope') != 'user' and b.get('status') == 'active' for b in record.get('remoteNodes', [])):
+            raise ValueError('当前订阅还有未启用计量的旧版专属绑定，请先迁移独立用户后再批量导入')
+        manager = remote_manager()
+        rows = {r['id']: r for r in manager.inbounds(server_id)['inbounds']}
+        if any(i in rows and rows[i].get('protocol') in PROTOCOLS and rows[i].get('enable') is not False for i in ids):
+            manager.preflight_user_support(server_id)
+    results = []
+    for identity in ids:
+        with ENFORCEMENT_LOCK:
+            record = profile_record()
+            row = rows.get(identity)
+            item = {'inboundId': identity, 'name': row.get('remark', '') if row else ''}
+            try:
+                info = traffic_info({**record, 'traffic': {**(record.get('traffic') or {}), 'enabled': True}})
+                if record.get('accessRevoked') or info.get('expired') or info.get('exhausted'):
+                    raise ValueError('订阅已到期或流量用尽，剩余节点未导入')
+                if (record.get('traffic') or {}).get('speedMbps'):
+                    raise ValueError('订阅已设置带宽限制，请先调整为不限速')
+                if not row:
+                    raise ValueError('远端入站不存在，请重新加载列表')
+                if row.get('protocol') not in PROTOCOLS:
+                    raise ValueError('此协议不支持独立订阅用户')
+                if row.get('enable') is False:
+                    raise ValueError('入站已停用，请先在服务器恢复')
+                _enable_batch_user_enforcement(record)
+                result = _provision_user_at_inbound(record, manager, server_id, row, None)
+                item.update(ok=True, added=result['added'], existing=result['existing'])
+            except Exception as exc:
+                item.update(ok=False, error=str(exc)[:500])
+            results.append(item)
+    return {'results': results, 'succeeded': sum(bool(x['ok']) for x in results),
+            'failed': sum(not x['ok'] for x in results),
+            'added': sum(x.get('added', 0) for x in results if x['ok']),
+            'existing': sum(x.get('existing', 0) for x in results if x['ok']),
+            'traffic': traffic_info(profile_record())}
+
+
 def _provision_user_at_inbound(record, manager, server_id, row, client):
     """Called under ENFORCEMENT_LOCK; all ownership changes are user-scoped."""
     from shared_users import new_user, endpoint_identity, user_identity, find_user, settings, counters
@@ -1146,7 +1226,7 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
         require_dedicated_inbound(row)
         if binding.get('identityHash') and binding['identityHash'] != remote_node_identity(row):
             raise ValueError('旧版入站身份已变化，不能自动迁移')
-        if (record.get('traffic') or {}).get('enforce') and not enforce_profile(record['id'], revoke=False):
+        if (record.get('traffic') or {}).get('enforce') and not enforce_profile(record['id'], revoke=False, only_binding=(server_id, inbound_id)):
             raise ValueError('迁移前旧用量结算失败，绑定未修改')
         clients = settings(row).get('clients', [])
         if len(clients) != 1 or not clients[0].get('email'):
@@ -3897,6 +3977,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out(remote_manager().attach_existing(str(data.get("id", ""))))
             if path == "/admin/api/servers/sni":
                 return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates"), force=data.get("force") is True))
+            if path == "/admin/api/servers/users/batch":
+                self.select_profile()
+                return self.json_out({"ok": True, **batch_subscription_users(data)})
             if path == "/admin/api/servers/users":
                 self.select_profile()
                 return self.json_out({"ok": True, **provision_subscription_user(data)})

@@ -113,7 +113,7 @@ class PublicSubscriptionTests(unittest.TestCase):
     def test_remote_server_routes_are_authenticated_before_any_connection(self):
         port = self.httpd.server_address[1]
         routes = {"GET": ["/server-chains", "/servers", "/servers/jobs?id=unknown", "/servers/metrics?id=unknown", "/servers/inbounds?id=unknown"],
-                  "POST": ["/servers", "/servers/probe", "/servers/install", "/servers/test", "/servers/attach", "/servers/diagnose", "/servers/inbounds", "/servers/relay", "/servers/sni", "/servers/bind", "/servers/users", "/servers/import", "/traffic/sync", "/nodes/validate"],
+                  "POST": ["/servers", "/servers/probe", "/servers/install", "/servers/test", "/servers/attach", "/servers/diagnose", "/servers/inbounds", "/servers/relay", "/servers/sni", "/servers/bind", "/servers/users", "/servers/users/batch", "/servers/import", "/traffic/sync", "/nodes/validate"],
                   "PUT": ["/servers", "/servers/inbounds", "/servers/bandwidth", "/traffic/bindings/remove"], "DELETE": ["/server-chains", "/servers", "/servers/inbounds"]}
         with patch.object(server, "remote_manager") as manager:
             for method, paths in routes.items():

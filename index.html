@@ -2263,6 +2263,107 @@ async function serverNodes(force = false) {
   renderRemoteNodes();
 }
 
+async function batchServerImport() {
+  const profile = S.profile;
+  openModal('从服务器批量导入节点', `<form id="batchServerForm">
+    <p>当前订阅：${esc(S.data?.profile?.name || '')}</p>
+    <p class="hint">勾选服务器入站，为当前订阅分别生成独立 UUID / 密码。重复导入复用已有用户，不另开端口。导入后自动启用流量统计和到期限制，沿用当前订阅额度、倍率和到期时间，不清零或续期。</p>
+    <p id="batchSubscriptionInfo" class="hint"></p>
+    <label for="batchServerSelect">服务器</label><select id="batchServerSelect" disabled><option>正在读取服务器…</option></select>
+    <button id="batchServerLoad" type="button" class="btn" disabled>加载服务器入站</button>
+    <div id="batchServerRows"></div><div id="batchServerError" class="error" role="alert"></div>
+    <p id="batchServerProgress" role="status" aria-live="polite"></p><div id="batchServerResults"></div>
+    <button id="batchServerSubmit" class="btn primary" disabled>导入所选节点并绑定订阅</button></form>`);
+  const form = $('batchServerForm');
+  let rows = [], loadedServer = '', busy = false, generation = 0;
+  const selected = new Set();
+  const t = S.data?.profile?.traffic || {};
+  $('batchSubscriptionInfo').textContent = `总额度：${t.total == null ? '不限' : formatBytes(t.total)} · 到期：${t.expire ? new Date(t.expire*1000).toLocaleString('zh-CN') : '长期有效'}。未设置额度或日期时，导入后先统计用量，可在“流量与有效期”继续设置。`;
+  const eligible = row => ['vless','vmess','trojan','hysteria2','tuic'].includes(row.protocol) && row.enable !== false;
+  const update = () => {
+    if (!form.isConnected) return;
+    $('batchServerSubmit').disabled = busy || !selected.size || loadedServer !== val('batchServerSelect');
+    $('batchServerSubmit').textContent = busy ? '正在导入…' : `导入所选 ${selected.size} 个节点并绑定订阅`;
+  };
+  const lock = value => {
+    busy=value;
+    form.querySelectorAll('input,select,button').forEach(n=>n.disabled=value);
+    if (!value) {
+      form.querySelectorAll('input[data-unsupported]').forEach(n=>n.disabled=true);
+      $('batchServerLoad').disabled=!val('batchServerSelect');
+      update();
+    }
+  };
+  try {
+    const data = await api('/servers');
+    if (!form.isConnected || S.profile !== profile) return;
+    const servers = (data.servers || []).filter(s=>s.job?.status !== 'running');
+    $('batchServerSelect').innerHTML = servers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.host)} · ${esc(s.installType || '3x-ui')}</option>`).join('');
+    $('batchServerSelect').disabled = !servers.length; $('batchServerLoad').disabled=!servers.length;
+    if (!servers.length) $('batchServerError').textContent='暂无可用服务器，请先在服务器管理添加并验证服务器。';
+  } catch (error) { if (form.isConnected) $('batchServerError').textContent=error.message; }
+  if (!form.isConnected) return;
+  $('batchServerSelect').onchange = () => {
+    generation++; loadedServer=''; rows=[]; selected.clear(); $('batchServerRows').innerHTML=''; $('batchServerResults').innerHTML=''; $('batchServerProgress').textContent=''; $('batchServerError').textContent=''; update();
+  };
+  $('batchServerLoad').onclick = async () => {
+    const serverId=val('batchServerSelect'), ticket=++generation;
+    if (!serverId || busy) return;
+    lock(true); $('batchServerError').textContent=''; $('batchServerProgress').textContent='正在读取该服务器入站…';
+    try {
+      const data = await api('/servers/inbounds?id='+encodeURIComponent(serverId));
+      if (!form.isConnected || ticket !== generation || S.profile !== profile) return;
+      rows=data.inbounds || [];loadedServer=serverId;selected.clear();
+      $('batchServerRows').innerHTML=`<p class="hint">一次最多选择 50 个。只为选中入站分配用户，不导入其他用户的凭据。独立内核仅列出总控受管入站。</p>
+        <label class="inlinecheck"><input id="batchServerAll" type="checkbox">全选可用入站（最多 50 个）</label>
+        <div class="checks">${rows.map(row=>`<label class="choice"><input type="checkbox" class="batchServerChoice" value="${row.id}" ${eligible(row) ? '' : 'disabled data-unsupported="true"'}><span>${esc(row.remark || '未命名')} · ${esc(row.protocol)} : ${row.port}${eligible(row) ? '' : row.enable === false ? '（入站已停用）' : '（不支持独立用户）'}</span></label>`).join('') || '<p class="hint">该服务器没有可导入的入站。</p>'}</div>`;
+      form.querySelectorAll('.batchServerChoice').forEach(input=>input.onchange=()=>{
+        if (input.checked && selected.size>=50) {input.checked=false;$('batchServerError').textContent='一次最多选择 50 个入站';return;}
+        if(input.checked)selected.add(Number(input.value));else selected.delete(Number(input.value));
+        $('batchServerAll').checked=false;update();
+      });
+      $('batchServerAll').onchange=()=>{
+        selected.clear();const all=$('batchServerAll').checked;
+        form.querySelectorAll('.batchServerChoice:not([data-unsupported])').forEach(input=>{input.checked=all&&selected.size<50;if(input.checked)selected.add(Number(input.value));});update();
+      };
+      $('batchServerProgress').textContent=`已读取 ${rows.length} 个入站，请勾选需要导入的节点。`;
+    } catch(error) {if(form.isConnected)$('batchServerError').textContent=error.message;}
+    finally {if(form.isConnected && ticket === generation)lock(false);}
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault(); if(busy || !selected.size)return;
+    if(S.profile!==profile){$('batchServerError').textContent='订阅已切换，请关闭窗口后重新导入';return;}
+    const serverId=loadedServer, ids=[...selected];
+    if(serverId!==val('batchServerSelect'))return;
+    lock(true);$('batchServerError').textContent='';$('batchServerResults').innerHTML='';
+    const results=[];
+    try {
+      // Small batches expose progress and bound each HTTP request. Every retry
+      // uses the same subscription/inbound identity; no blind UUID recreation.
+      for(let offset=0;offset<ids.length;offset+=3){
+        if(S.profile!==profile || !form.isConnected)break;
+        $('batchServerProgress').textContent=`正在处理 ${offset+1}–${Math.min(offset+3,ids.length)} / ${ids.length}，请勿重复提交…`;
+        const chunk=ids.slice(offset,offset+3), options=jsonOpt('POST',{serverId,inboundIds:chunk});options.headers['X-Profile']=profile;
+        try {
+          const result=await api('/servers/users/batch',options);
+          results.push(...result.results);
+          if(S.profile===profile && result.traffic)S.data.profile.traffic=result.traffic;
+        } catch(error){results.push(...chunk.map(inboundId=>({inboundId,ok:false,error:error.message+'；结果未确认，重试会核对已有用户'})));}
+        if(!form.isConnected)break;
+        $('batchServerResults').innerHTML=results.map(item=>`<p class="${item.ok ? 'hint' : 'error'}">入站 ${esc(item.inboundId)}：${item.ok ? (item.existing ? '已存在，复用专属用户' : '已导入并绑定专属用户') : esc(item.error || '失败')}</p>`).join('');
+      }
+      if(!form.isConnected)return;
+      const success=results.filter(r=>r.ok).length;
+      $('batchServerProgress').textContent=`已处理 ${results.length} / ${ids.length}，成功 ${success}，失败 ${results.length-success}。成功项已保存；失败或待核对项可重试。`;
+      for(const item of results)if(item.ok)selected.delete(item.inboundId);
+      $('batchServerAll').checked=false;
+      form.querySelectorAll('.batchServerChoice').forEach(n=>n.checked=selected.has(Number(n.value)));
+      if(S.profile===profile)await reload(false);
+    }catch(error){if(form.isConnected)$('batchServerError').textContent=error.message;}
+    finally{if(form.isConnected)lock(false);}
+  };
+}
+
 function sharedUserPicker() {
   const choices = (S.remoteRows || []).filter(r => ['vless','vmess','trojan','hysteria2','tuic'].includes(r.protocol));
   openModal('为订阅添加服务器节点', `<p class="hint">复用现有入站，为当前订阅创建独立 UUID / 密码；到期或流量用尽只处理此用户，不删除共用入站。</p>
@@ -3000,7 +3101,8 @@ function nodes() {
     <div class="toolbar">
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
       <button type="button" class="btn small primary" onclick="chooseNodeServer('create')">选择服务器添加订阅节点</button>
-      <button type="button" class="btn small" onclick="chooseNodeServer('browse')">从服务器导入节点</button>
+      <button type="button" class="btn small primary" onclick="batchServerImport()">从服务器批量导入节点</button>
+      <button type="button" class="btn small" onclick="chooseNodeServer('browse')">查看服务器节点</button>
       <button type="button" class="btn small" onclick="go('traffic')">订阅流量与有效期</button>
       <button type="button" class="btn small" onclick="selectAllNodes()">全选全部</button>
       <button type="button" class="btn small" onclick="clearNodeSelection()">取消选择</button>
