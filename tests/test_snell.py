@@ -1,14 +1,20 @@
 """Snell node management and native Mihomo config checks; no production access."""
 import base64
 import copy
+import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+from urllib.parse import parse_qs
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import server
 import test_subscription_enforcement as fixture
+import test_public_subscriptions as public_fixture
 
 
 def node(**changes):
@@ -25,7 +31,8 @@ class SnellTests(unittest.TestCase):
         original = node(server='2001:db8::12', psk='用户+%2F@: /?#&',
                         **{'obfs-opts': {'mode':'http','host':'bing.com'}})
         link = server.node_to_uri(original)
-        self.assertIn('@[2001:db8::12]:24443?', link)
+        payload=base64.b64decode(link.split('://',1)[1].split('?',1)[0]+'='*(-len(link.split('://',1)[1].split('?',1)[0])%4)).decode()
+        self.assertEqual(payload,'chacha20-ietf-poly1305:'+original['psk']+'@[2001:db8::12]:24443')
         self.assertEqual(server.parse_node_link(link), original)
         self.assertNotIn('用户', link)
 
@@ -81,7 +88,7 @@ class SnellTests(unittest.TestCase):
             value=node(**{'obfs-opts':obfs})
             self.assertEqual(server.validate_node_config(value),value)
             with self.assertRaisesRegex(ValueError,'完整 Mihomo'):server.node_to_uri(value)
-        for extra in ({'tfo':True},{'dialer-proxy':'entry'},{'client-fingerprint':'firefox'}):
+        for extra in ({'mptcp':True},{'dialer-proxy':'entry'},{'client-fingerprint':'firefox'}):
             with self.assertRaisesRegex(ValueError,'完整 Mihomo'):server.node_to_uri(node(**extra))
 
     def test_bad_obfs_rejected_in_raw_yaml_and_partial_subscription_import(self):
@@ -93,10 +100,38 @@ class SnellTests(unittest.TestCase):
     def test_other_client_exports_skip_snell_without_breaking_other_nodes(self):
         server.import_node_links({'links':server.node_to_uri(node())+'\nss://YWVzLTEyOC1nY206cGFzc3dvcmQ@example.com:443#ss-test'})
         self.assertEqual(server.read_config()['proxies'][0]['type'],'snell')
-        for client in ('v2rayn','v2rayng','v2ray','shadowrocket'):
+        for client in ('v2rayn','v2rayng','v2ray'):
             body,skipped=server.converted_subscription('clash',client)
             self.assertNotIn('snell://',base64.b64decode(body).decode())
             self.assertIn('Snell 测试',skipped)
+
+    def test_shadowrocket_subscription_and_qr_share_export_contain_actual_psk(self):
+        value=node(psk=' p@ss:?#%+& 密钥 ',tfo=True,**{'obfs-opts':{'mode':'http','host':'bing.com'}})
+        server.mutate_node('POST',{'config':value})
+        uri=server.exported_node_link(value['name'])['uri']
+        body,skipped=server.converted_subscription('clash','shadowrocket')
+        self.assertFalse(skipped)
+        self.assertEqual(base64.b64decode(body).decode(),uri)
+        encoded,query=uri.split('://',1)[1].split('?',1)
+        decoded=base64.b64decode(encoded+'='*(-len(encoded)%4)).decode('utf-8')
+        self.assertEqual(decoded,'chacha20-ietf-poly1305:'+value['psk']+'@example.com:24443')
+        params=parse_qs(query.split('#',1)[0])
+        self.assertEqual(params['version'],['4']);self.assertEqual(params['tfo'],['1'])
+        self.assertEqual(params['obfs-host'],['bing.com'])
+        self.assertEqual(server.parse_node_link(uri),value)
+        report=next(row for row in server.conversion_report() if row['id']=='shadowrocket')
+        self.assertEqual(report['supported'],1)
+
+    def test_new_shadowrocket_fixture_and_legacy_urls_import_same_psk(self):
+        payload='chacha20-ietf-poly1305:fixture-psk@example.com:24443'
+        encoded=base64.b64encode(payload.encode()).decode().rstrip('=')
+        value=server.parse_node_link('snell://'+encoded+'?version=3&tfo=0#fixture')
+        self.assertEqual(value['psk'],'fixture-psk');self.assertFalse(value['tfo'])
+        legacy=server.parse_node_link('snell://fixture-psk@example.com:24443?version=3#fixture')
+        self.assertEqual(legacy['psk'],value['psk'])
+        for bad in ('not-valid-base64',base64.b64encode(b'wrong-method:SECRET@example.com:24443').decode()):
+            with self.assertRaises(ValueError) as caught:server.parse_node_link('snell://'+bad+'?version=3')
+            self.assertNotIn('SECRET',str(caught.exception))
 
     def test_edit_preserves_unknown_yaml_options_and_source_is_not_mutated(self):
         original=node(**{'client-fingerprint':'chrome','tfo':True})
@@ -106,6 +141,32 @@ class SnellTests(unittest.TestCase):
         saved=server.read_config()['proxies'][0]
         server.mutate_node('PUT',{'oldName':saved['name'],'config':{**saved,'psk':'new-psk'}})
         self.assertTrue(server.read_config()['proxies'][0]['tfo'])
+
+
+class SnellHTTPExportTests(unittest.TestCase):
+    setUp=public_fixture.PublicSubscriptionTests.setUp
+    tearDown=public_fixture.PublicSubscriptionTests.tearDown
+
+    def test_public_subscription_and_qrcode_use_same_password_complete_link(self):
+        value=node(psk='http-fixture:PSK@with%reserved?#')
+        doc=server.minimal_profile_config();doc['proxies']=[value]
+        server.FILES[0].write_text(server.yaml_dump(doc),encoding='utf-8')
+        profile=server.list_profiles()[0]
+        base='http://127.0.0.1:'+str(self.httpd.server_address[1])
+        with urlopen(base+'/convert/'+profile['slug']+'/shadowrocket',timeout=5) as response:
+            subscription=base64.b64decode(response.read()).decode()
+        query=urlencode({'name':value['name']})
+        with patch.object(server.Handler,'authorized',return_value=True):
+            with urlopen(Request(base+'/admin/api/nodes/share?'+query,headers={'X-Profile':'clash'}),timeout=5) as response:
+                shared=json.load(response)
+            self.assertEqual(subscription,shared['uri'])
+            with patch.object(server,'subscription_qr_svg',wraps=server.subscription_qr_svg) as qr:
+                with urlopen(Request(base+'/admin/api/nodes/qrcode?'+query,headers={'X-Profile':'clash'}),timeout=5) as response:
+                    self.assertIn(b'<svg',response.read())
+                self.assertEqual(qr.call_args.args[0],shared['uri'])
+        encoded=shared['uri'].split('://',1)[1].split('?',1)[0]
+        self.assertEqual(base64.b64decode(encoded+'='*(-len(encoded)%4)).decode(),
+                         'chacha20-ietf-poly1305:'+value['psk']+'@example.com:24443')
 
 
 @unittest.skipUnless(os.environ.get('MXIOC_MIHOMO_BIN'),'set MXIOC_MIHOMO_BIN for native Snell checks')
@@ -143,6 +204,7 @@ class NativeSnellConfigTests(unittest.TestCase):
                 snell_port,mixed=free_port(),free_port()
                 psk=secrets.token_urlsafe(24)
                 value=node(server='127.0.0.1',port=snell_port,psk=psk,version=version,udp=version>=3,reuse=version>=4)
+                value=server.parse_node_link(server.node_to_uri(value))
                 listener={'name':'local-snell','type':'snell','listen':'127.0.0.1','port':snell_port,
                           'psk':psk,'version':version,'udp':version>=3,'proxy':'DIRECT'}
                 doc={'mixed-port':mixed,'bind-address':'127.0.0.1','allow-lan':False,'log-level':'silent',

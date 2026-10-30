@@ -139,6 +139,7 @@ SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "
 # A node supported by the Mihomo subscription is not necessarily supported by
 # Xray or Shadowrocket. Keep their existing export compatibility explicit.
 CLIENT_LINK_TYPES = SUPPORTED_NODE_TYPES - {"mieru", "snell"}
+SHADOWROCKET_LINK_TYPES = CLIENT_LINK_TYPES | {"snell"}
 CONVERSION_FORMATS = {
     "v2rayn": {
         "name": "电脑 v2rayN 节点订阅", "types": CLIENT_LINK_TYPES,
@@ -159,7 +160,7 @@ CONVERSION_FORMATS = {
         "note": "新版 v2rayNG 自定义 JSON 订阅；每个主备组一份完整 Xray 配置，不与普通节点订阅混用。端口需与 App 的本地 SOCKS 设置一致（默认 10808）。",
     },
     "shadowrocket-ha": {
-        "name": "小火箭主备 · 第一步：节点订阅", "types": CLIENT_LINK_TYPES, "kind": "shadowrocket-nodes",
+        "name": "小火箭主备 · 第一步：节点订阅", "types": SHADOWROCKET_LINK_TYPES, "kind": "shadowrocket-nodes",
         "note": "添加到首页订阅。仅包含受管主备组的转发路径，名称与第二步策略配置对应；流量与到期信息随订阅更新。",
     },
     "shadowrocket-config": {
@@ -173,8 +174,8 @@ CONVERSION_FORMATS = {
     },
     "shadowrocket": {
         "name": "Shadowrocket（小火箭）订阅",
-        "types": CLIENT_LINK_TYPES,
-        "note": "适合新版 Shadowrocket；旧版本可能无法识别 TUIC、Hysteria2 或 Reality。",
+        "types": SHADOWROCKET_LINK_TYPES,
+        "note": "适合新版 Shadowrocket，包含 Snell 节点与 PSK；服务端协议版本须匹配，旧客户端请先升级。",
     },
 }
 
@@ -3079,7 +3080,7 @@ def client_configuration_export(profile_id, format_id):
     for item, nodes in groups:
         try:
             for node in nodes:
-                if node.get("type") not in CLIENT_LINK_TYPES:
+                if node.get("type") not in SHADOWROCKET_LINK_TYPES:
                     raise ValueError("该客户端不支持 Mieru，请使用 Mihomo 完整订阅")
                 node_to_uri(node)
             compatible.append((item, nodes))

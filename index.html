@@ -3962,7 +3962,7 @@ function protocolFields(type, cfg = {}) {
       <div id="nSnellAlpnBox"><label for="nSnellAlpn">ShadowTLS ALPN</label><input id="nSnellAlpn" value="${esc((obfs.alpn || ['h2']).join(','))}"></div>
       <div id="nSnellHintBox"><label for="nSnellHint">Restls TLS 版本</label><select id="nSnellHint">${options(['tls12','tls13'],obfs['version-hint'] || 'tls13')}</select></div>
       <div id="nSnellUserBox"><label for="nSnellUser">JLS 用户名</label><input id="nSnellUser" value="${esc(obfs.username || '')}"></div>
-      </div><p class="hint">版本和混淆必须与 Snell 服务端一致，旧 Mihomo 内核可能不支持 v4 / v5 或扩展混淆。UDP 转发要求 v3 以上。本页管理客户端节点，不自动安装服务端，也不通过 Xray / sing-box 创建 Snell 入站。snell:// 是本项目兼容链接，第三方客户端建议使用完整 Mihomo YAML。</p>`;
+      </div><p class="hint">版本和混淆必须与 Snell 服务端一致，旧客户端可能不支持 v4 / v5 或扩展混淆。UDP 转发要求 v3 以上。本页管理客户端节点，不自动安装服务端。Snell 链接、二维码和小火箭订阅均按小火箭 Base64 格式携带 PSK；Mihomo 使用完整 YAML 订阅。</p>`;
   }
   let net = cfg.network || 'tcp';
   let ro = cfg['reality-opts'] || {};
@@ -4327,7 +4327,7 @@ function nodeModal(index) {
       if ($('nodePreviewResult') !== output) return;
       if (revision !== draftRevision) { $('formError').textContent = '配置已变更，请重新校验'; return; }
       output.classList.remove('hidden');
-      output.innerHTML = `<strong>配置校验通过 · 尚未保存</strong><p class="hint">协议 ${esc(optionLabel(data.config.type))} · 服务器 ${esc(data.config.server)}:${esc(data.config.port)}</p><details><summary>查看规范化配置（含认证信息）</summary><pre></pre></details>${data.uri ? (data.config.type === 'snell' ? '<p class="hint">可导出本项目 snell:// 兼容链接；第三方客户端请使用完整 Mihomo YAML。</p>' : '<p class="hint">支持导出通用单节点分享链接。</p>') : '<p class="hint">该链路需要 Mihomo 客户端配置，不能用单节点链接表达。</p>'}`;
+      output.innerHTML = `<strong>配置校验通过 · 尚未保存</strong><p class="hint">协议 ${esc(optionLabel(data.config.type))} · 服务器 ${esc(data.config.server)}:${esc(data.config.port)}</p><details><summary>查看规范化配置（含认证信息）</summary><pre></pre></details>${data.uri ? (data.config.type === 'snell' ? '<p class="hint">可导出包含 PSK 的小火箭 Snell 链接与二维码；Mihomo 使用完整 YAML。</p>' : '<p class="hint">支持导出通用单节点分享链接。</p>') : '<p class="hint">该链路需要 Mihomo 客户端配置，不能用单节点链接表达。</p>'}`;
       output.querySelector('pre').textContent = JSON.stringify(data.config, null, 2);
     } catch (error) { if ($('formError')) $('formError').textContent = error.message; }
     finally { if (button.isConnected) button.disabled = false; }
@@ -4610,7 +4610,7 @@ async function shareNode(index) {
       </div>
       <label>节点连接</label>
       <textarea id="nodeShareLink" readonly style="min-height:150px">${esc(data.uri)}</textarea>
-      <div class="note">${data.type === 'snell' ? 'Snell 二维码是本项目兼容链接，不是通用客户端导入标准；第三方客户端请优先使用完整 Mihomo YAML 订阅。' : '二维码与下方导出的文本包含同一条完整节点连接，可直接导入兼容客户端。'}</div>
+      <div class="note">${data.type === 'snell' ? '此 Snell 二维码采用小火箭 Base64 链接格式，包含 PSK、服务端地址及版本。旧版已扫入且密码为空的节点，请升级总控后重新扫码或更新小火箭订阅。' : '二维码与下方导出的文本包含同一条完整节点连接，可直接导入兼容客户端。'}</div>
       <div class="toolbar" style="margin-top:16px">
         <button type="button" class="btn primary" onclick="copyText(decodeURIComponent('${encodedUri}'))">复制节点连接</button>
         <button type="button" class="btn" onclick="downloadNodeLink(decodeURIComponent('${encodedName}'), decodeURIComponent('${encodedUri}'))">导出 TXT</button>

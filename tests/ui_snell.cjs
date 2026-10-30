@@ -14,6 +14,10 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    S.data={nodes:[],groups:[],rules:[],profile:{name:'test',traffic:{configured:false,bindings:[]}}};window.sent=[];
    api=async(url,opt)=>{
     if(url==='/snapshot')return S.data;
+    if(url.startsWith('/nodes/share?')){
+     const config=S.data.nodes[0].config;
+     return {name:config.name,type:'snell',uri:'snell://'+btoa('chacha20-ietf-poly1305:'+config.psk+'@'+config.server+':'+config.port).replace(/=+$/,'')+'?version='+config.version+'#'+encodeURIComponent(config.name)};
+    }
     if(url==='/nodes'){
      const config=JSON.parse(opt.body).config;sent.push(config);
      S.data.nodes=[{index:0,name:config.name,type:config.type,server:config.server,port:config.port,config}];
@@ -49,6 +53,11 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    await page.click('#nodeSave');await page.waitForSelector('#modal.hidden',{timeout:4000});
    assert(!await page.evaluate(()=>Object.hasOwn(sent.at(-1),'obfs-opts')));
   }
+  await page.evaluate(()=>shareNode(0));
+  const shared=await page.$eval('#nodeShareLink',el=>el.value);
+  const auth=Buffer.from(shared.split('://')[1].split('?')[0],'base64').toString('utf8');
+  assert.equal(auth,'chacha20-ietf-poly1305: secret PSK @example.com:24443');
+  assert((await page.$eval('#modal',el=>el.textContent)).includes('包含 PSK'));
   await page.evaluate(()=>nodeModal(null));await page.select('#nType','snell');
   assert.equal(await page.$('#nUuid'),null);assert(await page.$('#nSnellPsk'));
   assert.equal(await page.$eval('#nSnellVersion',el=>el.value),'4');

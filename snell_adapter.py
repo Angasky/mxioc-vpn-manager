@@ -1,4 +1,5 @@
-"""Mihomo Snell nodes; snell:// is a project interchange format, not universal."""
+"""Snell nodes and Shadowrocket-compatible Base64 share URLs; legacy imports kept."""
+import base64
 import copy
 import csv
 import re
@@ -14,7 +15,7 @@ def validate(node):
     if type(version) is not int or version not in range(1, 6):
         raise ValueError('当前 Mihomo Snell 支持版本 1–5，请与服务端版本一致')
     node['version'] = version
-    for key in ('udp', 'reuse'):
+    for key in ('udp', 'reuse', 'tfo'):
         if key in node and type(node[key]) is not bool:
             raise ValueError('Snell ' + key + ' 必须为布尔值')
     if node.get('udp') and version < 3:
@@ -51,6 +52,25 @@ def validate(node):
 
 
 def parse(link):
+    # Shadowrocket: snell://BASE64(method:PSK@host:port)?version=N#name.
+    # Split the envelope before URL parsing: standard Base64 may contain '/'.
+    envelope = link.split('://', 1)
+    if len(envelope) != 2 or envelope[0].lower() != 'snell':
+        raise ValueError('Snell 链接协议无效')
+    body, _, fragment = envelope[1].partition('#')
+    authority, _, query_text = body.partition('?')
+    raw_query = parse_qs(query_text, keep_blank_values=True)
+    encoded_psk = None
+    if '@' not in authority and 'psk' not in raw_query:
+        try:
+            decoded = base64.b64decode(authority + '=' * (-len(authority) % 4), altchars=b'-_', validate=True).decode('utf-8')
+            auth, separator, endpoint = decoded.rpartition('@')
+            method, colon, encoded_psk = auth.partition(':')
+            if not separator or not colon or method != 'chacha20-ietf-poly1305' or not encoded_psk:
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise ValueError('Snell Base64 认证段无效，必须包含加密标识、PSK 和服务器端口') from None
+        link = 'snell://' + endpoint + ('?' + query_text if query_text else '') + ('#' + fragment if fragment else '')
     parsed = urlsplit(link)
     if parsed.scheme.lower() != 'snell' or not parsed.hostname or parsed.path not in ('', '/'):
         raise ValueError('Snell 链接须包含有效的服务器地址和端口')
@@ -61,7 +81,7 @@ def parse(link):
     if port is None or not 1 <= port <= 65535 or parsed.password is not None:
         raise ValueError('Snell 端口或认证格式无效，PSK 特殊字符请进行 URL 编码')
     query = parse_qs(parsed.query, keep_blank_values=True)
-    allowed = {'psk', 'version', 'udp', 'reuse', 'obfs', 'obfs-host'}
+    allowed = {'psk', 'version', 'udp', 'reuse', 'tfo', 'obfs', 'obfs-host'}
     if any(k not in allowed or len(v) != 1 for k, v in query.items()):
         raise ValueError('Snell 链接含重复或未适配参数，请使用完整 Mihomo YAML')
     if parsed.username is not None and 'psk' in query:
@@ -70,9 +90,9 @@ def parse(link):
     if not re.fullmatch('[1-5]', version):
         raise ValueError('Snell 链接版本须为 1–5')
     node = {'name': unquote(parsed.fragment) or '导入的 Snell 节点', 'type': 'snell',
-            'server': parsed.hostname, 'port': port, 'psk': unquote(parsed.username or '') if parsed.username is not None else query.get('psk', [''])[0],
+            'server': parsed.hostname, 'port': port, 'psk': encoded_psk if encoded_psk is not None else (unquote(parsed.username or '') if parsed.username is not None else query.get('psk', [''])[0]),
             'version': int(version)}
-    for key in ('udp', 'reuse'):
+    for key in ('udp', 'reuse', 'tfo'):
         if key in query:
             value = query[key][0].lower()
             if value not in ('true', 'false', '1', '0'):
@@ -109,18 +129,24 @@ def parse_policy(line):
 
 def to_uri(node):
     node = validate(node)
-    allowed = {'name','type','server','port','psk','version','udp','reuse','obfs-opts'}
+    allowed = {'name','type','server','port','psk','version','udp','reuse','tfo','obfs-opts'}
     obfs = node.get('obfs-opts') or {}
     if (set(node) - allowed or set(obfs) - {'mode','host'} or obfs.get('mode') not in (None,'http','tls')):
-        raise ValueError('此 Snell 扩展参数不能用项目链接无损表达，请使用完整 Mihomo 订阅')
+        raise ValueError('此 Snell 扩展参数不能用小火箭链接无损表达，请使用完整 Mihomo 订阅')
     host = node['server']
     host = '[' + host.strip('[]') + ']' if ':' in host else host
     query = {'version': node['version']}
     for key in ('udp','reuse'):
         if key in node:
             query[key] = str(node[key]).lower()
+    if 'tfo' in node:
+        if type(node['tfo']) is not bool:
+            raise ValueError('Snell tfo 必须为布尔值')
+        query['tfo'] = '1' if node['tfo'] else '0'
     if obfs:
         query['obfs'] = obfs['mode']
         if 'host' in obfs:
             query['obfs-host'] = obfs['host']
-    return 'snell://' + quote(node['psk'],safe='') + '@' + host + ':' + str(node['port']) + '?' + urlencode(query) + '#' + quote(node['name'],safe='')
+    payload = 'chacha20-ietf-poly1305:' + node['psk'] + '@' + host + ':' + str(node['port'])
+    encoded = base64.b64encode(payload.encode('utf-8')).decode('ascii').rstrip('=')
+    return 'snell://' + encoded + '?' + urlencode(query) + '#' + quote(node['name'],safe='')
