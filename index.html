@@ -641,9 +641,23 @@ tbody tr:hover {
   user-select: none;
 }
 .drag-handle:active { cursor: grabbing; }
-tbody tr.dragging { opacity: .42; }
-tbody tr.drag-before { box-shadow: inset 0 2px 0 var(--blue-bright); }
-tbody tr.drag-after { box-shadow: inset 0 -2px 0 var(--blue-bright); }
+.node-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr)); gap:10px; }
+.node-card { min-width:0; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset); padding:12px; }
+.node-card-head { display:flex; align-items:center; gap:8px; min-width:0; }
+.node-card-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+.node-card-order { color:var(--text-muted); font-family:var(--font-mono); font-size:11px; }
+.node-card-meta { display:flex; gap:5px; flex-wrap:wrap; margin:8px 0; font-size:11px; }
+.node-card-address { color:var(--text-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:10px; }
+.node-card-actions { display:flex; gap:5px; flex-wrap:wrap; }
+.node-card-actions .btn.small { padding:4px 7px; font-size:11px; }
+.node-card.selected { border-color:var(--blue-bright); background:rgb(var(--accent-rgb) / .08); }
+.node-card .drag-handle { display:inline-flex; align-items:center; justify-content:center; min-width:32px; min-height:32px; padding:4px; border:0; border-radius:4px; background:transparent; touch-action:none; }
+.node-card.dragging { opacity:.3; outline:2px dashed var(--blue-bright); outline-offset:-2px; }
+.node-drag-ghost { position:fixed; z-index:1500; pointer-events:none; opacity:.94; box-shadow:0 8px 28px #0003; background:var(--bg-input); }
+.node-drag-ghost .node-card-actions { visibility:hidden; }
+.node-drag-active, .node-drag-active * { cursor:grabbing !important; user-select:none !important; }
+.node-sort-status { font-size:12px; color:var(--blue-bright); min-height:20px; margin:10px 0; }
+@media (prefers-reduced-motion:reduce) { .node-grid * { transition:none !important; } }
 code {
   padding: 2px 6px;
   border-radius: 4px;
@@ -1406,6 +1420,9 @@ SOFTWARE.
   <circle cx="12" cy="12" r="10" />
   <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
   <path d="M2 12h20" />
+</symbol><symbol id="icon-grip-vertical" viewBox="0 0 24 24">
+  <circle cx="9" cy="12" r="1" /><circle cx="9" cy="5" r="1" /><circle cx="9" cy="19" r="1" />
+  <circle cx="15" cy="12" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="15" cy="19" r="1" />
 </symbol><symbol id="icon-hard-drive" viewBox="0 0 24 24">
   <path d="M10 16h.01" />
   <path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -1620,6 +1637,7 @@ function notice(text) {
 }
 
 function showLogin() {
+  window.cancelNodeDrag?.();
   stopMonitoring();
   S.monitorHistory = new Map(); S.monitorData = null; S.monitorId = '';
   S.monitorCards = new Map(); closeSniScanner();
@@ -1851,6 +1869,7 @@ const pageSections = {
 const sectionFor = page => Object.keys(pageSections).find(key => pageSections[key].includes(page)) || 'overview';
 
 async function go(page) {
+  window.cancelNodeDrag?.();
   if (page !== 'monitoring') stopMonitoring();
   if (S.page !== page) $('content').innerHTML = '<div class="empty" role="status">正在加载…</div>';
   S.page = page;
@@ -3153,8 +3172,8 @@ async function overview() {
 
 function nodes() {
   let q = S.filters.nodes || '';
-  const page = tableSlice(S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + nodeProtocol(x) + ' ' + x.server).toLowerCase().includes(q.toLowerCase())), 'nodes');
-  let rows = page.rows;
+  if (window.cancelNodeDrag) window.cancelNodeDrag();
+  let rows = S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + nodeProtocol(x) + ' ' + x.server).toLowerCase().includes(q.toLowerCase()));
   $('content').innerHTML = cards() + `
   <section class="panel">
     <div class="toolbar">
@@ -3170,40 +3189,29 @@ function nodes() {
       <span id="nodeSelectedCount" class="pill">已选择 0 个</span>
     </div>
     <div class="note">“自动添加国旗”会处理已勾选节点；未勾选时处理全部节点。系统根据服务器公网 IP 判断国家，并自动去除名称开头已有的国旗后再添加，因此重复执行不会叠加国旗。</div>
-    <div class="tablewrap">
-      <table>
-        <thead>
-          <tr>
-            <th><input id="nodeSelectAll" type="checkbox" aria-label="全选当前页节点" onchange="toggleAllVisibleNodes(this.checked)"></th>
-            <th>顺序</th>
-            <th>节点名称</th>
-            <th>协议</th>
-            <th>服务器</th>
-            <th>端口</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="nodeRows">
+    <div class="toolbar"><label><input id="nodeSelectAll" type="checkbox" aria-label="全选当前筛选节点" onchange="toggleAllVisibleNodes(this.checked)"> 选择当前结果</label><span class="muted">显示 ${rows.length} / ${S.data.nodes.length} 个节点</span></div>
+    <div id="nodeSortStatus" class="node-sort-status" role="status" aria-live="polite">拖动卡片右侧手柄排序，靠近屏幕上下边缘可连续滚动；按 Esc 取消。筛选时按可见节点插入，其他节点保持相对顺序。</div>
+    <div id="nodeRows" class="node-grid" role="list" aria-label="节点顺序">
           ${rows.map(x => `
-            <tr data-node-name="${esc(x.name)}">
-              <td><input class="node-select" type="checkbox" data-node-select="${esc(x.name)}" aria-label="选择 ${esc(x.name)}" onchange="toggleNodeSelection(this)"></td>
-              <td><span class="drag-handle" draggable="true" title="拖动排序">↕</span> <code>${x.index + 1}</code></td>
-              <td><b>${esc(x.name)}</b></td>
-              <td><code>${esc(nodeProtocol(x))}</code></td>
-              <td>${esc(x.server)}</td>
-              <td>${esc(x.port)}</td>
-              <td>
+            <article class="node-card" role="listitem" data-node-name="${esc(x.name)}">
+              <div class="node-card-head">
+                <input class="node-select" type="checkbox" data-node-select="${esc(x.name)}" aria-label="选择 ${esc(x.name)}" onchange="toggleNodeSelection(this)">
+                <b class="node-card-name" title="${esc(x.name)}">${esc(x.name)}</b>
+                <span class="node-card-order">#${x.index + 1}</span>
+                <button type="button" class="drag-handle" title="拖动排序；键盘上下键移动，Home / End 置顶 / 置底" aria-label="拖动排序 ${esc(x.name)}">${uiIcon('grip-vertical')}</button>
+              </div>
+              <div class="node-card-meta"><code>${esc(nodeProtocol(x))}</code>${x.config?.udp ? '<span class="pill">UDP</span>' : ''}${x.config?.['dialer-proxy'] ? '<span class="pill">链式代理</span>' : ''}</div>
+              <div class="node-card-address" title="${esc(x.server)}:${esc(x.port)}">${esc(x.server)}:${esc(x.port)}</div>
+              <div class="node-card-actions">
                 <button class="btn small" onclick="moveNode(${x.index},-1)" ${x.index === 0 ? 'disabled' : ''} title="上移" aria-label="上移">${uiIcon('arrow-up-from-line')}</button>
                 <button class="btn small" onclick="moveNode(${x.index},1)" ${x.index === S.data.nodes.length - 1 ? 'disabled' : ''} title="下移" aria-label="下移">${uiIcon('arrow-down-to-line')}</button>
+                <button class="btn small" onclick="nodePositionModal(${x.index})">移到…</button>
                 <button class="btn small primary" onclick="shareNode(${x.index})" title="显示二维码并导出节点链接">二维码/导出</button>
                 <button class="btn small" onclick="nodeModal(${x.index})">编辑</button>
                 <button class="btn small danger" onclick="deleteNode(${x.index})">删除</button>
-              </td>
-            </tr>`).join('') || '<tr><td colspan="7" class="empty">未找到匹配的节点</td></tr>'}
-        </tbody>
-      </table>
+              </div>
+            </article>`).join('') || '<div class="empty">未找到匹配的节点</div>'}
     </div>
-    ${pagination(page)}
   </section>`;
   bindSearch('nodes', nodes);
   setupNodeDrag();
@@ -3212,7 +3220,10 @@ function nodes() {
 
 function updateNodeSelectionUi() {
   let boxes = [...document.querySelectorAll('.node-select')];
-  boxes.forEach(box => { box.checked = S.nodeSelection.has(box.dataset.nodeSelect); });
+  boxes.forEach(box => {
+    box.checked = S.nodeSelection.has(box.dataset.nodeSelect);
+    box.closest('.node-card')?.classList.toggle('selected', box.checked);
+  });
   let selectedVisible = boxes.filter(box => box.checked).length;
   let master = $('nodeSelectAll');
   if (master) {
@@ -3249,35 +3260,106 @@ function clearNodeSelection() {
 }
 
 function setupNodeDrag() {
-  let dragged = '';
-  let rows = [...document.querySelectorAll('#nodeRows tr[data-node-name]')];
-  let clearMarks = () => rows.forEach(row => row.classList.remove('dragging', 'drag-before', 'drag-after'));
-  rows.forEach(row => {
-    let handle = row.querySelector('.drag-handle');
-    handle.ondragstart = event => {
-      dragged = row.dataset.nodeName;
-      row.classList.add('dragging');
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', dragged);
+  const grid = $('nodeRows');
+  grid.onpointerdown = event => {
+    const handle = event.target.closest('.drag-handle');
+    if (!handle || event.button !== 0 || !event.isPrimary || S.nodeOrderSaving) return;
+    event.preventDefault();
+    const card = handle.closest('.node-card'), original = [...grid.children];
+    const profile = S.profile, controller = new AbortController(), signal = controller.signal;
+    const startX = event.clientX, startY = event.clientY, rect = card.getBoundingClientRect();
+    let x = startX, y = startY, ghost = null, frame = 0, lastTime = 0;
+    const anchor = document.documentElement.style.overflowAnchor;
+    // Capture on the stable grid: moving a captured card in the DOM loses capture.
+    grid.setPointerCapture(event.pointerId);
+    const preview = () => {
+      // The translucent source remains a real grid slot, avoiding layout churn at rest.
+      const hit = document.elementFromPoint(x, y)?.closest('#nodeRows > .node-card');
+      if (!hit || hit === card) return;
+      const children = [...grid.children];
+      if (children.indexOf(card) < children.indexOf(hit)) grid.insertBefore(card, hit.nextSibling);
+      else grid.insertBefore(card, hit);
     };
-    handle.ondragend = () => { dragged = ''; clearMarks(); };
-    row.ondragover = event => {
-      if (!dragged || dragged === row.dataset.nodeName) return;
-      event.preventDefault();
-      clearMarks();
-      let rect = row.getBoundingClientRect();
-      row.classList.add(event.clientY < rect.top + rect.height / 2 ? 'drag-before' : 'drag-after');
+    const tick = time => {
+      if (!grid.isConnected || S.page !== 'nodes' || S.profile !== profile) { finish(false); return; }
+      const dt = Math.min(32, lastTime ? time - lastTime : 16); lastTime = time;
+      ghost.style.transform = `translate3d(${x - (startX - rect.left)}px,${y - (startY - rect.top)}px,0)`;
+      const edge = Math.min(100, innerHeight / 5);
+      const speed = y < edge ? -Math.pow(Math.max(0, 1 - y / edge), 2) : y > innerHeight - edge ? Math.pow(Math.min(1, (y - innerHeight + edge) / edge), 2) : 0;
+      // rAF keeps scrolling even if the pointer is held still at the edge.
+      if (speed && x >= grid.getBoundingClientRect().left && x <= grid.getBoundingClientRect().right) window.scrollBy(0, speed * dt * 1.8);
+      preview();
+      frame = requestAnimationFrame(tick);
     };
-    row.ondrop = async event => {
-      event.preventDefault();
-      let position = row.classList.contains('drag-after') ? 'after' : 'before';
-      let targetName = row.dataset.nodeName;
-      clearMarks();
-      if (!dragged || dragged === targetName) return;
-      await dragNode(dragged, targetName, position);
-      dragged = '';
+    const finish = save => {
+      controller.abort(); cancelAnimationFrame(frame);
+      if (grid.hasPointerCapture(event.pointerId)) grid.releasePointerCapture(event.pointerId);
+      document.documentElement.style.overflowAnchor = anchor;
+      document.body.classList.remove('node-drag-active');
+      const active = !!ghost; ghost?.remove(); card.classList.remove('dragging');
+      window.cancelNodeDrag = null;
+      if (!save) { original.forEach(item => grid.append(item)); if ($('nodeSortStatus')) $('nodeSortStatus').textContent = '排序已取消，未保存更改'; return; }
+      const current = [...grid.children];
+      if (!active || current.every((item, i) => item === original[i])) return;
+      const next = card.nextElementSibling, previous = card.previousElementSibling;
+      void dragNode(card.dataset.nodeName, (next || previous).dataset.nodeName, next ? 'before' : 'after');
     };
-  });
+    window.cancelNodeDrag = () => finish(false);
+    grid.addEventListener('pointermove', move => {
+      if (move.pointerId !== event.pointerId) return;
+      x = move.clientX; y = move.clientY;
+      if (!ghost && Math.hypot(x - startX, y - startY) > 6) {
+        ghost = card.cloneNode(true); ghost.classList.add('node-drag-ghost');
+        ghost.setAttribute('aria-hidden', 'true'); ghost.inert = true;
+        ghost.style.cssText = `left:0;top:0;width:${rect.width}px;`;
+        ghost.removeAttribute('data-node-name');
+        ghost.querySelectorAll('input').forEach(input => input.classList.remove('node-select'));
+        document.body.append(ghost); card.classList.add('dragging');
+        document.body.classList.add('node-drag-active');
+        document.documentElement.style.overflowAnchor = 'none';
+        $('nodeSortStatus').textContent = '松手保存当前位置 · 靠近上下边缘连续滚动 · Esc 取消';
+        frame = requestAnimationFrame(tick);
+      }
+    }, {signal});
+    grid.addEventListener('pointerup', up => {
+      if (up.pointerId !== event.pointerId) return;
+      x = up.clientX; y = up.clientY;
+      if (ghost) preview();
+      finish(x >= 0 && x <= innerWidth && y >= 0 && y <= innerHeight);
+    }, {signal});
+    grid.addEventListener('pointercancel', () => finish(false), {signal});
+    grid.addEventListener('lostpointercapture', () => finish(false), {signal});
+    window.addEventListener('blur', () => finish(false), {signal});
+    document.addEventListener('keydown', key => { if (key.key === 'Escape') { key.preventDefault(); finish(false); } }, {signal});
+  };
+  grid.onkeydown = event => {
+    const handle = event.target.closest('.drag-handle');
+    if (!handle || S.nodeOrderSaving || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const name = handle.closest('.node-card').dataset.nodeName;
+    const node = S.data.nodes.find(item => item.name === name);
+    if (event.key === 'Home' || event.key === 'End') {
+      void dragNode(name, S.data.nodes[event.key === 'Home' ? 0 : S.data.nodes.length - 1].name, event.key === 'Home' ? 'before' : 'after');
+    } else void moveNode(node.index, event.key === 'ArrowUp' ? -1 : 1);
+  };
+}
+
+function nodePositionModal(index) {
+  const node = S.data.nodes.find(item => item.index === index);
+  if (!node || S.nodeOrderSaving) return;
+  const profile = S.profile;
+  openModal('移动节点位置', `<form id="nodePositionForm"><p>${esc(node.name)}</p><label for="nodePosition">目标顺序（1–${S.data.nodes.length}）</label><input id="nodePosition" type="number" min="1" max="${S.data.nodes.length}" step="1" value="${index + 1}" required><p class="hint">使用订阅中所有节点的完整顺序，包含搜索未显示的节点。</p><button class="btn primary" type="submit">保存位置</button></form>`);
+  $('nodePositionForm').onsubmit = async event => {
+    event.preventDefault();
+    if (S.profile !== profile) { closeModal(); return; }
+    const position = Number($('nodePosition').value) - 1;
+    if (!Number.isInteger(position) || position < 0 || position >= S.data.nodes.length) return;
+    const from = S.data.nodes.findIndex(item => item.name === node.name);
+    if (from < 0 || from === position) { closeModal(); return; }
+    const button = event.currentTarget.querySelector('button'); button.disabled = true;
+    if (await dragNode(node.name, S.data.nodes[position].name, position < from ? 'before' : 'after')) closeModal();
+    else button.disabled = false;
+  };
 }
 
 async function chains() {
@@ -4877,22 +4959,39 @@ async function moveRule(i, d) {
 async function moveNode(i, direction) {
   let node = S.data.nodes.find(item => item.index === i);
   if (!node) return;
-  try {
-    await api('/nodes/move', jsonOpt('POST', { name: node.name, direction }));
-    await reload();
-    notice('节点顺序已保存');
-  } catch (error) {
-    alert(error.message);
-  }
+  const index = S.data.nodes.indexOf(node), target = S.data.nodes[index + direction];
+  if (target) return dragNode(node.name, target.name, direction < 0 ? 'before' : 'after');
 }
 
 async function dragNode(name, targetName, position) {
+  if (S.nodeOrderSaving || name === targetName) return false;
+  const profile = S.profile, scroll = window.scrollY;
+  const grid = $('nodeRows');
+  const focusedHandle = document.activeElement?.closest('.drag-handle');
+  S.nodeOrderSaving = true;
+  if (grid) grid.inert = true;
+  if ($('nodeSortStatus')) $('nodeSortStatus').textContent = '正在保存节点顺序…';
   try {
     await api('/nodes/move', jsonOpt('POST', { name, targetName, position }));
-    await reload();
-    notice('节点拖拽排序已保存');
+    if (S.profile !== profile) return true;
+    await reload(false);
+    if (S.page === 'nodes' && S.profile === profile) {
+      nodes(); window.scrollTo(0, scroll);
+      if (focusedHandle) [...document.querySelectorAll('#nodeRows > .node-card')].find(card => card.dataset.nodeName === name)?.querySelector('.drag-handle').focus({preventScroll:true});
+      $('nodeSortStatus').textContent = '节点顺序已保存';
+      notice('节点顺序已保存');
+    }
+    return true;
   } catch (error) {
-    alert(error.message);
+    if (S.profile === profile && S.page === 'nodes') {
+      nodes(); window.scrollTo(0, scroll);
+      $('nodeSortStatus').textContent = '排序保存失败，已恢复显示；请刷新确认：' + error.message;
+      notice('排序保存失败：' + error.message);
+    }
+    return false;
+  } finally {
+    S.nodeOrderSaving = false;
+    if (grid) grid.inert = false;
   }
 }
 
