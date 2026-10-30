@@ -22,6 +22,11 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
         nodes();
       };
       api = async (url,opt) => {
+        if (url === '/nodes/group-options') return {groups:['Proxy','Cloudflare']};
+        if (url === '/nodes/groups') {
+          window.membership = JSON.parse(opt.body);
+          return {ok:true};
+        }
         if (url === '/snapshot') return S.data;
         if (url === '/nodes/move') {
           const data = JSON.parse(opt.body); sent.push(data);
@@ -115,6 +120,21 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[points[1]]});
     await pause(80); await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await saved();
     assert.equal((await names())[0],'Node 002','touch drag reorders');
+    await page.evaluate(() => {
+      S.data.groups = [{name:'Proxy',config:{proxies:['Node 002']}},{name:'Cloudflare',config:{proxies:['Proxy']}}];
+      return nodeGroupsModal(0);
+    });
+    assert.equal(await page.$$eval('.node-group-picker input:checked',els => els.map(el=>el.value).join(',')),'Proxy');
+    await page.$eval('.node-group-picker input[value="Proxy"]',el=>el.click());
+    await page.$eval('.node-group-picker input[value="Cloudflare"]',el=>el.click());
+    await page.type('#groupSearch','Cloud');
+    assert(await page.$eval('[data-group-name="Proxy"]',el=>el.hidden));
+    await page.click('#nodeGroupsForm button');
+    await page.waitForSelector('#modal.hidden');
+    assert.deepEqual(await page.evaluate(()=>membership),{name:'Node 002',groups:['Cloudflare']});
+    await page.evaluate(()=>importNodeModal());
+    assert((await page.$eval('#nodeLink',el=>el.placeholder)).includes('snell://'));
+    await page.evaluate(()=>closeModal());
     assert.deepEqual(errors,[]);
     console.log('PASS: 120-node continuous grid; stationary edge scroll, single-save drag, cancellation, absolute/filtered positions, failed save recovery, keyboard, mobile touch and three themes');
   } finally { await browser.close(); await new Promise(resolve => fixture.close(resolve)); }

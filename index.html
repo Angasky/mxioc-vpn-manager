@@ -642,6 +642,24 @@ tbody tr:hover {
 }
 .drag-handle:active { cursor: grabbing; }
 .node-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr)); gap:10px; }
+select { appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23818a9b' stroke-width='2'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px !important; cursor:pointer; border-radius:8px; }
+select:focus-visible { outline:2px solid var(--blue-bright); outline-offset:2px; }
+select option { background:var(--bg-input); color:var(--text); }
+.node-group-picker { display:grid; gap:8px; max-height:45vh; overflow:auto; margin:14px 0; }
+.node-group-picker .choice { padding:12px; border:1px solid var(--border); border-radius:8px; }
+.node-secondary { border-top:1px solid var(--border); margin-top:14px; padding-top:12px; }
+.node-secondary summary { cursor:pointer; color:var(--text-muted); font-size:12px; padding:6px 0; }
+.node-secondary[open] > .toolbar { margin-top:10px; }
+.node-card-actions details { margin-left:auto; position:relative; }
+.node-card-actions summary { cursor:pointer; list-style:none; }
+.node-card-actions details[open] > div { position:absolute; right:0; top:30px; z-index:5; min-width:180px; display:flex; flex-wrap:wrap; gap:6px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); box-shadow:0 6px 18px #0002; }
+@supports (appearance:base-select) {
+  select, select::picker(select) { appearance:base-select; }
+  select { background-image:none; padding-right:12px !important; }
+  select::picker(select) { background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 8px 24px #0002; max-height:320px; }
+  select option { padding:9px 12px; border-radius:6px; }
+  select option:hover, select option:focus { background:rgb(var(--accent-rgb) / .12); }
+}
 .node-card { min-width:0; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset); padding:12px; }
 .node-card-head { display:flex; align-items:center; gap:8px; min-width:0; }
 .node-card-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
@@ -3176,12 +3194,15 @@ function nodes() {
   let rows = S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + nodeProtocol(x) + ' ' + x.server).toLowerCase().includes(q.toLowerCase()));
   $('content').innerHTML = cards() + `
   <section class="panel">
+    <div class="panel-head"><div><h3>我的节点</h3><p class="hint">导入链接或从服务器创建节点，点击卡片上的“策略组”设置用途。</p></div><button type="button" class="btn primary" onclick="importNodeModal()">${uiIcon('circle-plus')}导入链接</button></div>
     <div class="toolbar">
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
       <button type="button" class="btn small primary" onclick="chooseNodeServer('create')">选择服务器添加订阅节点</button>
       <button type="button" class="btn small primary" onclick="batchServerImport()">从服务器批量导入节点</button>
       <button type="button" class="btn small" onclick="chooseNodeServer('browse')">查看服务器节点</button>
       <button type="button" class="btn small" onclick="go('traffic')">订阅流量与有效期</button>
+    </div>
+    <details class="node-secondary"><summary>批量操作与名称整理</summary><div class="toolbar">
       <button type="button" class="btn small" onclick="selectAllNodes()">全选全部</button>
       <button type="button" class="btn small" onclick="clearNodeSelection()">取消选择</button>
       <button type="button" class="btn small primary" onclick="autoAddCountryFlags()">${uiIcon('globe')}自动添加国旗</button>
@@ -3189,6 +3210,7 @@ function nodes() {
       <span id="nodeSelectedCount" class="pill">已选择 0 个</span>
     </div>
     <div class="note">“自动添加国旗”会处理已勾选节点；未勾选时处理全部节点。系统根据服务器公网 IP 判断国家，并自动去除名称开头已有的国旗后再添加，因此重复执行不会叠加国旗。</div>
+    </details>
     <div class="toolbar"><label><input id="nodeSelectAll" type="checkbox" aria-label="全选当前筛选节点" onchange="toggleAllVisibleNodes(this.checked)"> 选择当前结果</label><span class="muted">显示 ${rows.length} / ${S.data.nodes.length} 个节点</span></div>
     <div id="nodeSortStatus" class="node-sort-status" role="status" aria-live="polite">拖动卡片右侧手柄排序，靠近屏幕上下边缘可连续滚动；按 Esc 取消。筛选时按可见节点插入，其他节点保持相对顺序。</div>
     <div id="nodeRows" class="node-grid" role="list" aria-label="节点顺序">
@@ -3203,12 +3225,15 @@ function nodes() {
               <div class="node-card-meta"><code>${esc(nodeProtocol(x))}</code>${x.config?.udp ? '<span class="pill">UDP</span>' : ''}${x.config?.['dialer-proxy'] ? '<span class="pill">链式代理</span>' : ''}</div>
               <div class="node-card-address" title="${esc(x.server)}:${esc(x.port)}">${esc(x.server)}:${esc(x.port)}</div>
               <div class="node-card-actions">
+                <button class="btn small" onclick="nodeModal(${x.index})">编辑</button>
+                <button class="btn small" onclick="nodeGroupsModal(${x.index})">策略组</button>
+                <button class="btn small primary" onclick="shareNode(${x.index})" title="显示二维码并导出节点链接">分享</button>
+                <details><summary class="btn small" aria-label="更多节点操作">更多</summary><div>
                 <button class="btn small" onclick="moveNode(${x.index},-1)" ${x.index === 0 ? 'disabled' : ''} title="上移" aria-label="上移">${uiIcon('arrow-up-from-line')}</button>
                 <button class="btn small" onclick="moveNode(${x.index},1)" ${x.index === S.data.nodes.length - 1 ? 'disabled' : ''} title="下移" aria-label="下移">${uiIcon('arrow-down-to-line')}</button>
                 <button class="btn small" onclick="nodePositionModal(${x.index})">移到…</button>
-                <button class="btn small primary" onclick="shareNode(${x.index})" title="显示二维码并导出节点链接">二维码/导出</button>
-                <button class="btn small" onclick="nodeModal(${x.index})">编辑</button>
                 <button class="btn small danger" onclick="deleteNode(${x.index})">删除</button>
+                </div></details>
               </div>
             </article>`).join('') || '<div class="empty">未找到匹配的节点</div>'}
     </div>
@@ -4632,11 +4657,37 @@ function dnsModal(encoded) {
   };
 }
 
+async function nodeGroupsModal(index) {
+  const node = S.data.nodes.find(item => item.index === index), profile = S.profile;
+  if (!node) return;
+  try {
+    const result = await api('/nodes/group-options');
+    if (S.profile !== profile || S.page !== 'nodes') return;
+    const allowed = new Set(result.groups);
+    const groups = S.data.groups.filter(group => allowed.has(group.name));
+    openModal('节点策略组', `<form id="nodeGroupsForm"><h3>${esc(node.name)}</h3><p class="hint">勾选加入，取消勾选移除。已有成员顺序保持不变，新加入的节点放在组尾。</p><input id="groupSearch" placeholder="搜索策略组" aria-label="搜索策略组"><div class="node-group-picker">${groups.map(group => `<label class="choice" data-group-name="${esc(group.name)}"><input type="checkbox" value="${esc(group.name)}" ${(group.config?.proxies || []).includes(node.name) ? 'checked' : ''}><span>${esc(group.name)}</span></label>`).join('') || '<p class="hint">暂无可编辑策略组，请先创建策略组。</p>'}</div><div id="membershipError" class="error"></div><button class="btn primary" ${groups.length ? '' : 'disabled'}>保存策略组</button></form>`);
+    $('groupSearch').oninput = event => document.querySelectorAll('[data-group-name]').forEach(label => {
+      label.hidden = !label.dataset.groupName.toLowerCase().includes(event.target.value.toLowerCase());
+      label.classList.toggle('hidden', label.hidden);
+    });
+    $('nodeGroupsForm').onsubmit = async event => {
+      event.preventDefault();
+      if (S.profile !== profile) { closeModal(); return; }
+      const button = event.currentTarget.querySelector('button'); button.disabled = true;
+      try {
+        await api('/nodes/groups', jsonOpt('POST', {name:node.name, groups:[...document.querySelectorAll('.node-group-picker input:checked')].map(input => input.value)}));
+        closeModal(); await reload(); notice('节点策略组已保存');
+      } catch (error) { if ($('membershipError')) $('membershipError').textContent = error.message; }
+      finally { button.disabled = false; }
+    };
+  } catch (error) { notice(error.message); }
+}
+
 function importNodeModal() {
   openModal('IMPORT_NODES // 批量通过链接导入节点', `
   <form id="editForm">
-    <label>节点分享链接</label>
-    <textarea id="nodeLink" required style="min-height:220px" placeholder="每行粘贴一条链接：&#10;vless://...&#10;tuic://...&#10;mierus://用户名:密码@服务器?profile=名称&amp;port=2999&amp;protocol=TCP&#10;hysteria2://...&#10;&#10;支持 mierus（Mieru）、vless、tuic、hysteria2 / hy2、trojan、ss、vmess、socks5、http、https。"></textarea>
+    <label>节点分享链接（支持 Snell）</label>
+    <textarea id="nodeLink" required style="min-height:220px" placeholder="每行粘贴一条链接：&#10;snell://...&#10;vless://...&#10;tuic://...&#10;mierus://用户名:密码@服务器?profile=名称&amp;port=2999&amp;protocol=TCP&#10;hysteria2://...&#10;&#10;支持 snell://（完整 Base64 / PSK 链接）、mierus（Mieru）、vless、tuic、hysteria2 / hy2、trojan、ss、vmess、socks5、http、https。"></textarea>
     <div class="note">支持一次粘贴多条链接：每行一条，空行会忽略。系统会逐条解析认证信息、TLS / Reality 公钥、SNI、ALPN、流控和带宽；Mieru 一条链接中的多组端口 / 协议会分别导入；同名节点将自动追加序号，不会覆盖已有节点。mieru:// 完整配置请先使用官方工具导出为 mierus://。</div>
     <label class="inlinecheck">
       <input id="importAll" type="checkbox" checked>

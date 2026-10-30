@@ -2695,6 +2695,31 @@ def set_node_groups(doc, name, selected_groups, old_name=None):
         group["proxies"] = refs
 
 
+@profile_locked
+def mutate_node_membership(payload):
+    name = payload.get("name")
+    selected = payload.get("groups")
+    if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
+        raise ValueError("请选择策略组")
+    doc = read_config()
+    if not any(node.get("name") == name for node in doc.get("proxies", [])):
+        raise ValueError("节点不存在，请刷新")
+    allowed = set(eligible_group_names(doc))
+    if set(selected) - allowed:
+        raise ValueError("策略组已变化，请刷新后重试")
+    for group in doc.get("proxy-groups", []):
+        if group.get("name") not in allowed:
+            continue
+        refs = list(group.get("proxies", []) or [])
+        if group["name"] in selected:
+            if name not in refs:
+                refs.append(name)
+        else:
+            refs = [ref for ref in refs if ref != name]
+        group["proxies"] = refs
+    write_config(doc, "node-groups")
+
+
 def mutate_chain(method, payload):
     protect_failover_component(str(payload.get("oldName", "")))
     mode = payload.get("mode", "mihomo")
@@ -3920,6 +3945,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.svg_out(subscription_qr_svg((query.get("url") or [""])[0]))
                 return
             self.select_profile()
+            if path == "/admin/api/nodes/group-options":
+                self.json_out({"groups": eligible_group_names(read_config())})
+                return
             if path == "/admin/api/snapshot":
                 accepts_gzip = any(part.split(";", 1)[0].strip() == "gzip" and not re.search(r";\s*q=0(?:\.0*)?(?:\s|$)", part)
                                    for part in self.headers.get("Accept-Encoding", "").split(","))
@@ -4081,6 +4109,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out(subscription_preview(data))
             elif path == "/admin/api/import-subscription":
                 return self.json_out({"ok": True, **import_subscription(data)})
+            elif path == "/admin/api/nodes/groups": mutate_node_membership(data)
             elif path == "/admin/api/groups": mutate_group("POST", data)
             elif path == "/admin/api/rules": mutate_rule("POST", data)
             elif path == "/admin/api/rules/move": move_rule(data)

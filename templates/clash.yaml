@@ -851,8 +851,8 @@ proxy-groups:
 - name: 🌩️ Cloudflare
   type: select
   proxies:
-  - DIRECT
   - ✈️ Proxy
+  - DIRECT
 - name: ☁️ OneDrive
   type: select
   proxies:
