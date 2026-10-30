@@ -37,13 +37,16 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    assert(!(await page.$eval('#nSnellPasswordBox',el=>el.classList.contains('hidden'))));
    await page.$eval('#nSnellPassword',el=>el.value=' obfs secret ');
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-   await page.click('#nodeSave');await page.waitForSelector('#modal.hidden');
+   await page.$eval('#nodeSave',el=>el.scrollIntoView({block:'center'}));
+   assert.equal(await page.$eval('#nodeSave',el=>{const r=el.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.id;}),'nodeSave',`${theme}/${width}: save button covered`);
+   await page.click('#nodeSave');await page.waitForSelector('#modal.hidden',{timeout:4000});
    const saved=await page.evaluate(()=>sent.at(-1));
    assert.equal(saved.version,5);assert.equal(saved.psk,' secret PSK ');assert.equal(saved.reuse,true);
    assert.equal(saved['obfs-opts'].password,' obfs secret ');assert.equal(saved['obfs-opts'].version,3);
    assert.deepEqual(saved['obfs-opts'].alpn,['h2']);
    await page.evaluate(()=>nodeModal(0));await page.select('#nSnellMode','');
-   await page.click('#nodeSave');await page.waitForSelector('#modal.hidden');
+   await page.$eval('#nodeSave',el=>el.scrollIntoView({block:'center'}));
+   await page.click('#nodeSave');await page.waitForSelector('#modal.hidden',{timeout:4000});
    assert(!await page.evaluate(()=>Object.hasOwn(sent.at(-1),'obfs-opts')));
   }
   await page.evaluate(()=>nodeModal(null));await page.select('#nType','snell');
