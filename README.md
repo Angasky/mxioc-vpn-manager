@@ -1,5 +1,7 @@
 # 🚀 MXIOC VPN Manager
 
+[Snell 节点使用说明](docs/snell.md) · 支持 Mihomo v1–v5 节点添加、编辑与导入。
+
 一个面向 Mihomo / Clash 的可视化订阅管理后台。无需数据库，通过网页即可管理节点、链式代理、策略组、路由规则、DNS 分流和多份订阅配置。
 
 [中文更新日志](CHANGELOG.md) · [客户端适配说明](docs/client-compatibility.md)

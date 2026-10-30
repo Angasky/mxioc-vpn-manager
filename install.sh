@@ -495,6 +495,7 @@ install_application() {
     stage_file remote_manager.py
     stage_file bandwidth.py
     stage_file mieru_adapter.py
+    stage_file snell_adapter.py
     stage_file shared_users.py
     stage_file panel_user_runtime.py
     stage_file client_adapter.py
@@ -512,7 +513,7 @@ install_application() {
     [[ ! -f "${APP_DIR}/server.py" ]] || cp -- "${APP_DIR}/server.py" "${APP_DIR}/code-backups/server.py.${stamp}"
     [[ ! -f "${APP_DIR}/index.html" ]] || cp -- "${APP_DIR}/index.html" "${APP_DIR}/code-backups/index.html.${stamp}"
     [[ ! -f "${APP_DIR}/remote_manager.py" ]] || cp -- "${APP_DIR}/remote_manager.py" "${APP_DIR}/code-backups/remote_manager.py.${stamp}"
-    for adapter in client_adapter.py core_adapter.py server_monitor.py bandwidth.py reality_probe.py mieru_adapter.py shared_users.py panel_user_runtime.py; do
+    for adapter in client_adapter.py core_adapter.py server_monitor.py bandwidth.py reality_probe.py mieru_adapter.py snell_adapter.py shared_users.py panel_user_runtime.py; do
       [[ ! -f "${APP_DIR}/${adapter}" ]] || cp -- "${APP_DIR}/${adapter}" "${APP_DIR}/code-backups/${adapter}.${stamp}"
     done
     install -m 0644 "${STAGE_DIR}/server.py" "${APP_DIR}/server.py"
@@ -521,6 +522,7 @@ install_application() {
     install -m 0644 "${STAGE_DIR}/panel_user_runtime.py" "${APP_DIR}/panel_user_runtime.py"
     install -m 0644 "${STAGE_DIR}/shared_users.py" "${APP_DIR}/shared_users.py"
     install -m 0644 "${STAGE_DIR}/mieru_adapter.py" "${APP_DIR}/mieru_adapter.py"
+    install -m 0644 "${STAGE_DIR}/snell_adapter.py" "${APP_DIR}/snell_adapter.py"
     install -m 0644 "${STAGE_DIR}/client_adapter.py" "${APP_DIR}/client_adapter.py"
     install -m 0644 "${STAGE_DIR}/core_adapter.py" "${APP_DIR}/core_adapter.py"
     install -m 0644 "${STAGE_DIR}/reality_probe.py" "${APP_DIR}/reality_probe.py"

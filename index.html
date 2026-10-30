@@ -3883,6 +3883,7 @@ const OPTION_LABELS = {
   hysteria2: 'Hysteria2（抗丢包 QUIC）',
   trojan: 'Trojan（TLS 伪装协议）',
   ss: 'Shadowsocks（加密代理）',
+  snell: 'Snell（Mihomo v1–v5）',
   vmess: 'VMess（V2Ray 协议）',
   socks5: 'SOCKS5（通用出口代理）',
   http: 'HTTP（网页代理，仅 TCP）',
@@ -3948,6 +3949,21 @@ function on(id) { return !!$(id)?.checked; }
 function numberOrText(x) { let n = Number(x); return x !== '' && Number.isFinite(n) ? n : x; }
 
 function protocolFields(type, cfg = {}) {
+  if (type === 'snell') {
+    const obfs = cfg['obfs-opts'] || {};
+    return `<h4 class="protocol-title">Snell 认证与混淆参数</h4><div class="grid">
+      <div><label for="nSnellPsk">预共享密钥 PSK</label><input id="nSnellPsk" type="password" required value="${esc(cfg.psk || '')}"></div>
+      <div><label for="nSnellVersion">服务端协议版本</label><select id="nSnellVersion" onchange="renderSnellOptions()">${options(['1','2','3','4','5'],String(cfg.version ?? 4))}</select></div>
+      <div><label for="nSnellMode">混淆模式</label><select id="nSnellMode" onchange="renderSnellOptions()">${Object.entries({'':'不混淆',http:'HTTP 混淆',tls:'TLS 混淆','shadow-tls':'ShadowTLS',restls:'Restls',jls:'JLS'}).map(([value,label])=>`<option value="${value}" ${value===(obfs.mode || '')?'selected':''}>${label}</option>`).join('')}</select></div>
+      <div id="nSnellHostBox"><label for="nSnellHost">混淆 Host</label><input id="nSnellHost" value="${esc(obfs.host || '')}" placeholder="例如 bing.com"></div>
+      <div class="inlinecheck"><input id="nSnellReuse" type="checkbox" ${cfg.reuse ? 'checked' : ''}><label for="nSnellReuse">连接复用（v4 / v5）</label></div>
+      <div id="nSnellPasswordBox"><label for="nSnellPassword">混淆密码</label><input id="nSnellPassword" type="password" value="${esc(obfs.password || '')}"></div>
+      <div id="nSnellTlsVersionBox"><label for="nSnellTlsVersion">ShadowTLS 版本</label><select id="nSnellTlsVersion">${options(['1','2','3'],String(obfs.version ?? 3))}</select></div>
+      <div id="nSnellAlpnBox"><label for="nSnellAlpn">ShadowTLS ALPN</label><input id="nSnellAlpn" value="${esc((obfs.alpn || ['h2']).join(','))}"></div>
+      <div id="nSnellHintBox"><label for="nSnellHint">Restls TLS 版本</label><select id="nSnellHint">${options(['tls12','tls13'],obfs['version-hint'] || 'tls13')}</select></div>
+      <div id="nSnellUserBox"><label for="nSnellUser">JLS 用户名</label><input id="nSnellUser" value="${esc(obfs.username || '')}"></div>
+      </div><p class="hint">版本和混淆必须与 Snell 服务端一致，旧 Mihomo 内核可能不支持 v4 / v5 或扩展混淆。UDP 转发要求 v3 以上。本页管理客户端节点，不自动安装服务端，也不通过 Xray / sing-box 创建 Snell 入站。snell:// 是本项目兼容链接，第三方客户端建议使用完整 Mihomo YAML。</p>`;
+  }
   let net = cfg.network || 'tcp';
   let ro = cfg['reality-opts'] || {};
   let go = cfg['grpc-opts'] || {};
@@ -4094,6 +4110,16 @@ function renderTransport() {
     </div>` : '';
 }
 
+function renderSnellOptions() {
+  if (!$('nSnellVersion')) return;
+  const mode=val('nSnellMode'), version=Number(val('nSnellVersion'));
+  const fields={nSnellHostBox:!!mode,nSnellPasswordBox:['shadow-tls','restls','jls'].includes(mode),nSnellTlsVersionBox:mode==='shadow-tls',nSnellAlpnBox:mode==='shadow-tls',nSnellHintBox:mode==='restls',nSnellUserBox:mode==='jls'};
+  for (const [id,shown] of Object.entries(fields)) $(id)?.classList.toggle('hidden',!shown);
+  for (const [id,enabled] of [['nUdp',version>=3],['nSnellReuse',version>=4]]) {
+    const input=$(id);if(input){input.disabled=!enabled;if(!enabled)input.checked=false;}
+  }
+}
+
 function renderProtocol() {
   let type = val('nType');
   let box = $('protocolBox');
@@ -4109,6 +4135,7 @@ function renderProtocol() {
       if (udp.disabled) udp.checked = false;
     }
     renderTransport();
+    renderSnellOptions();
     if ($('nUuid')) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'btn small'; button.textContent = '生成新 UUID';
@@ -4123,7 +4150,20 @@ function readNodeForm() {
   let port = numberOrText(val('nPort'));
   let cfg = { ...(window.nodeDraft || {}), name: val('nName'), type, server: val('nServer'), port, udp: on('nUdp') };
 
-  if (type === 'mieru') {
+  if (type === 'snell') {
+    cfg.psk=$('nSnellPsk').value;cfg.version=Number(val('nSnellVersion'));cfg.reuse=on('nSnellReuse');
+    const mode=val('nSnellMode');
+    if(mode){
+      const obfs={...(cfg['obfs-opts']?.mode===mode ? cfg['obfs-opts'] : {}),mode};
+      for(const key of ['host','password','version','alpn','version-hint','username'])delete obfs[key];
+      if(val('nSnellHost'))obfs.host=val('nSnellHost');
+      if(['shadow-tls','restls','jls'].includes(mode))obfs.password=$('nSnellPassword').value;
+      if(mode==='shadow-tls'){obfs.version=Number(val('nSnellTlsVersion'));obfs.alpn=val('nSnellAlpn').split(',').map(x=>x.trim()).filter(Boolean);}
+      if(mode==='restls')obfs['version-hint']=val('nSnellHint');
+      if(mode==='jls')obfs.username=val('nSnellUser');
+      cfg['obfs-opts']=obfs;
+    }else delete cfg['obfs-opts'];
+  } else if (type === 'mieru') {
     cfg.username = val('nMieruUsername'); cfg.password = val('nMieruPassword');
     cfg.transport = val('nMieruTransport');
     if (val('nMieruRange')) { cfg['port-range'] = val('nMieruRange'); delete cfg.port; }
@@ -4239,7 +4279,7 @@ function nodeModal(index) {
         </div>
         <div>
           <label>协议类型</label>
-          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'mieru', 'socks5', 'http', 'https'], formType || 'vless')}</select>
+          <select id="nType" onchange="window.nodeDraft={};renderProtocol()">${options(['vless', 'tuic', 'hysteria2', 'trojan', 'ss', 'vmess', 'mieru', 'snell', 'socks5', 'http', 'https'], formType || 'vless')}</select>
         </div>
         <div>
           <label>服务器域名 / IP</label>
@@ -4287,7 +4327,7 @@ function nodeModal(index) {
       if ($('nodePreviewResult') !== output) return;
       if (revision !== draftRevision) { $('formError').textContent = '配置已变更，请重新校验'; return; }
       output.classList.remove('hidden');
-      output.innerHTML = `<strong>配置校验通过 · 尚未保存</strong><p class="hint">协议 ${esc(optionLabel(data.config.type))} · 服务器 ${esc(data.config.server)}:${esc(data.config.port)}</p><details><summary>查看规范化配置（含认证信息）</summary><pre></pre></details>${data.uri ? '<p class="hint">支持导出通用单节点分享链接。</p>' : '<p class="hint">该链路需要 Mihomo 客户端配置，不能用单节点链接表达。</p>'}`;
+      output.innerHTML = `<strong>配置校验通过 · 尚未保存</strong><p class="hint">协议 ${esc(optionLabel(data.config.type))} · 服务器 ${esc(data.config.server)}:${esc(data.config.port)}</p><details><summary>查看规范化配置（含认证信息）</summary><pre></pre></details>${data.uri ? (data.config.type === 'snell' ? '<p class="hint">可导出本项目 snell:// 兼容链接；第三方客户端请使用完整 Mihomo YAML。</p>' : '<p class="hint">支持导出通用单节点分享链接。</p>') : '<p class="hint">该链路需要 Mihomo 客户端配置，不能用单节点链接表达。</p>'}`;
       output.querySelector('pre').textContent = JSON.stringify(data.config, null, 2);
     } catch (error) { if ($('formError')) $('formError').textContent = error.message; }
     finally { if (button.isConnected) button.disabled = false; }
@@ -4570,7 +4610,7 @@ async function shareNode(index) {
       </div>
       <label>节点连接</label>
       <textarea id="nodeShareLink" readonly style="min-height:150px">${esc(data.uri)}</textarea>
-      <div class="note">二维码与下方导出的文本包含同一条完整节点连接，可直接导入兼容客户端。</div>
+      <div class="note">${data.type === 'snell' ? 'Snell 二维码是本项目兼容链接，不是通用客户端导入标准；第三方客户端请优先使用完整 Mihomo YAML 订阅。' : '二维码与下方导出的文本包含同一条完整节点连接，可直接导入兼容客户端。'}</div>
       <div class="toolbar" style="margin-top:16px">
         <button type="button" class="btn primary" onclick="copyText(decodeURIComponent('${encodedUri}'))">复制节点连接</button>
         <button type="button" class="btn" onclick="downloadNodeLink(decodeURIComponent('${encodedName}'), decodeURIComponent('${encodedUri}'))">导出 TXT</button>

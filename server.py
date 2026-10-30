@@ -135,10 +135,10 @@ def host_metrics(identity):
 
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 NON_NODE_GROUPS = {"🛑 广告拦截", "🛡️ 基础广告拦截", "🔥 强力广告拦截"}
-SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5", "http", "mieru"}
+SUPPORTED_NODE_TYPES = {"vless", "tuic", "hysteria2", "trojan", "ss", "vmess", "socks5", "http", "mieru", "snell"}
 # A node supported by the Mihomo subscription is not necessarily supported by
 # Xray or Shadowrocket. Keep their existing export compatibility explicit.
-CLIENT_LINK_TYPES = SUPPORTED_NODE_TYPES - {"mieru"}
+CLIENT_LINK_TYPES = SUPPORTED_NODE_TYPES - {"mieru", "snell"}
 CONVERSION_FORMATS = {
     "v2rayn": {
         "name": "电脑 v2rayN 节点订阅", "types": CLIENT_LINK_TYPES,
@@ -2258,6 +2258,8 @@ def validate_config(doc):
             validate_mieru(node)
             if node.get("transport") not in ("TCP", "UDP"):
                 raise ValueError("Mieru YAML 必须明确设置 transport: TCP 或 UDP")
+        if node.get("type") == "snell":
+            validate_node_config(node)
         dialer = node.get("dialer-proxy")
         if dialer and dialer not in known:
             raise ValueError(f"链式节点 {node.get('name', '?')} 引用了不存在的前置中转：{dialer}")
@@ -2455,7 +2457,7 @@ def normalize_ipv6_authority(link):
 
 
 SHARE_LINK_PATTERN = re.compile(
-    r"(?i)(?:mierus|mieru|vless|tuic|hysteria2|hy2|trojan|ss|vmess|socks5|socks|https?)://[^\s<>]+"
+    r"(?i)(?:snell|mierus|mieru|vless|tuic|hysteria2|hy2|trojan|ss|vmess|socks5|socks|https?)://[^\s<>]+"
 )
 
 
@@ -2466,6 +2468,9 @@ def extract_node_links(value):
         raise ValueError("请至少粘贴一条节点链接")
     links = []
     for line in text.splitlines():
+        if re.match(r'^\s*[^=\r\n]+\s*=\s*snell\s*,', line, re.I):
+            links.append(line.strip())
+            continue
         for link in SHARE_LINK_PATTERN.findall(line.strip().strip("`")):
             # A link copied from Markdown may retain the closing parenthesis or punctuation.
             links.append(link.rstrip("，；;。]}>)]\"'"))
@@ -2476,9 +2481,15 @@ def extract_node_links(value):
 
 def parse_node_link(link):
     link = str(link or "").strip().strip('"\'').replace("\\://", "://").replace("\\@", "@").replace("\\.", ".")
+    if re.match(r'^[^=\r\n]+\s*=\s*snell\s*,', link, re.I):
+        from snell_adapter import parse_policy
+        return validate_node_config(parse_policy(link))
     if not link or "://" not in link:
         raise ValueError("请输入完整的节点链接")
     scheme = link.split("://", 1)[0].lower()
+    if scheme == "snell":
+        from snell_adapter import parse
+        return validate_node_config(parse(link))
     if scheme in ("mierus", "mieru"):
         from mieru_adapter import parse_nodes
         nodes = [validate_node_config(node) for node in parse_nodes(link)]
@@ -2773,14 +2784,14 @@ def parse_subscription_text(text):
                 skipped.append(str(node.get("name") or "信息不完整的节点"))
                 continue
             try:
-                nodes.append(validate_node_config(node) if node_type == "mieru" else normalize_reality_options(node))
+                nodes.append(validate_node_config(node) if node_type in ("mieru", "snell") else normalize_reality_options(node))
             except ValueError as error:
                 skipped.append(f"{node.get('name', '未知节点')}（{error}）")
         return nodes, skipped
-    candidates = [text]
+    candidates = text.splitlines()
     try:
         decoded = b64decode_text(text)
-        if "://" in decoded:
+        if "://" in decoded or re.search(r'=\s*snell\s*,', decoded, re.I):
             candidates = decoded.splitlines()
     except Exception:
         if "\n" in text:
@@ -2789,10 +2800,15 @@ def parse_subscription_text(text):
         line = line.strip()
         if not line:
             continue
+        if line.lower() == '[proxy]':
+            continue
         try:
             nodes.extend(parse_node_links(line))
         except Exception:
-            skipped.append(line.split("#", 1)[-1][:80] if "#" in line else "无法识别的节点")
+            if line.lower().startswith('snell://') or re.match(r'^[^=\r\n]+\s*=\s*snell\s*,', line, re.I):
+                skipped.append("无法识别的 Snell 节点（参数无效）")
+            else:
+                skipped.append(line.split("#", 1)[-1][:80] if "#" in line else "无法识别的节点")
     if not nodes:
         raise ValueError("订阅中没有找到可导入的 Clash 或分享链接节点")
     return nodes, skipped
@@ -2907,6 +2923,9 @@ def add_transport_query(node, query):
 
 def node_to_uri(node):
     node_type = str(node.get("type", "")).lower()
+    if node_type == "snell":
+        from snell_adapter import to_uri
+        return to_uri(validate_node_config(node))
     if node_type == "mieru":
         from mieru_adapter import to_uri
         return to_uri(node)
@@ -3104,7 +3123,7 @@ def conversion_report(profile_id=None):
             if node.get("dialer-proxy"):
                 reason = "链式代理无法用单节点分享链接表达"
             elif str(node.get("type", "")).lower() not in info["types"]:
-                reason = "客户端不支持该协议"
+                reason = "本导出格式未适配 Snell，请使用完整 Mihomo 订阅" if node.get("type") == "snell" else "客户端不支持该协议"
             if reason:
                 skipped.append({"name": node.get("name", "未知节点"), "type": node.get("type", ""), "reason": reason})
             else:
@@ -3408,6 +3427,9 @@ def validate_node_config(config):
         node = validate_mieru(node)
     else:
         node["port"] = valid_port(node.get("port"))
+    if kind == "snell":
+        from snell_adapter import validate as validate_snell
+        node = validate_snell(node)
     name = str(node.get("name") or "").strip()
     if not name or len(name) > 200 or any(c in name for c in "\r\n\0"):
         raise ValueError("节点名称须为 1–200 字符且不能含换行")
