@@ -1,66 +1,122 @@
-<p align="center"><img src="docs/assets/readme-banner.svg" alt="MXIOC · 节点、订阅与服务器管理" width="100%"></p>
+<p align="center">
+  <img src="docs/assets/readme-banner.svg" alt="MXIOC VPN Manager" width="100%">
+</p>
 
 <h1 align="center">MXIOC VPN Manager</h1>
-<p align="center">把节点、订阅和服务器，放进一个清爽的控制台。</p>
+<p align="center"><strong>你的节点，你的订阅，一个控制台。</strong></p>
+<p align="center">面向 Mihomo / Clash 的可视化管理面板，让日常配置更直观。</p>
 
 <p align="center">
-  <a href="#快速开始">快速开始</a> ·
-  <a href="docs/server-node-workflow.md">使用指南</a> ·
-  <a href="CHANGELOG.md">更新日志</a> ·
-  <a href="https://github.com/Angasky/mxioc-vpn-manager/issues">反馈问题</a>
+  <a href="https://github.com/Angasky/mxioc-vpn-manager/stargazers"><img src="https://img.shields.io/github/stars/Angasky/mxioc-vpn-manager?style=for-the-badge&amp;color=2563eb&amp;label=Stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/Angasky/mxioc-vpn-manager/commits/main"><img src="https://img.shields.io/github/last-commit/Angasky/mxioc-vpn-manager?style=for-the-badge&amp;color=0891b2&amp;label=Updated" alt="最近更新"></a>
+  <a href="https://github.com/Angasky/mxioc-vpn-manager/issues"><img src="https://img.shields.io/github/issues/Angasky/mxioc-vpn-manager?style=for-the-badge&amp;color=7c3aed&amp;label=Issues" alt="GitHub Issues"></a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Mihomo%20%2F%20Clash-订阅管理-2563eb?style=flat-square" alt="Mihomo / Clash 订阅管理">
-  <img src="https://img.shields.io/badge/Python-轻量部署-0f766e?style=flat-square" alt="Python 轻量部署">
-  <img src="https://img.shields.io/badge/UI-三种主题-7c3aed?style=flat-square" alt="三种主题">
+  <a href="#界面一览">界面一览</a> &nbsp; / &nbsp;
+  <a href="#功能地图">功能地图</a> &nbsp; / &nbsp;
+  <a href="#快速部署">快速部署</a> &nbsp; / &nbsp;
+  <a href="#使用文档">使用文档</a>
 </p>
 
-## 一个面板，管理日常所需
+---
 
-- **节点** — 链接导入、卡片排序、策略组分配、二维码分享。
-- **订阅** — 多订阅管理、套餐模板、额度与有效期、客户端格式转换。
-- **服务器** — 接入已有面板、创建节点、HY2 模板、硬件监控。
-- **分流** — 策略组、路由规则、DNS 与链式代理，可视化配置。
+## 界面一览
 
-支持 VLESS、VMess、Trojan、Shadowsocks、HY2、TUIC、Snell、Mieru、SOCKS5 等协议。各客户端与服务器内核的支持范围见[兼容说明](docs/client-compatibility.md)。
+**科技主题 · 把节点、策略和操作放在眼前**
 
-## 快速开始
+![科技主题 · 节点管理](docs/assets/theme-high.png)
 
-在 Linux 服务器执行：
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>简洁主题</strong><br><sub>减少装饰，专注管理</sub></td>
+    <td align="center" width="50%"><strong>猛男主题</strong><br><sub>暖粉配色，柔和留白</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/theme-low.png" alt="简洁主题 · 节点管理" width="100%"></td>
+    <td><img src="docs/assets/theme-pink.png" alt="猛男主题 · 节点管理" width="100%"></td>
+  </tr>
+</table>
+
+<p align="center"><sub>截图来自当前界面，使用示例节点数据；三个主题可在设置中切换。</sub></p>
+
+## 功能地图
+
+| 模块 | 你可以做什么 |
+| :--- | :--- |
+| **节点管理** | 链接批量导入、拖拽排序、单节点策略组、二维码分享 |
+| **订阅管理** | 多份订阅、套餐模板、流量额度、倍率与有效期 |
+| **服务器管理** | 接入已有面板、创建节点、HY2 模板、硬件监控 |
+| **规则分流** | 策略组、路由规则、DNS 分流与链式代理 |
+| **日常维护** | 网页更新、历史备份、配置校验、账号管理 |
+
+### 协议与客户端
+
+`VLESS` · `VMess` · `Trojan` · `Shadowsocks` · `HY2` · `TUIC` · `Snell` · `Mieru` · `SOCKS5` · `HTTP(S)`
+
+**Mihomo / Clash** 完整订阅 &nbsp; · &nbsp; **V2Ray 系列** 节点订阅 &nbsp; · &nbsp; **Shadowrocket** 节点订阅
+
+> [!NOTE]
+> 协议能力随客户端和服务器内核而异。导出前可查看兼容提示，详见[客户端适配说明](docs/client-compatibility.md)。
+
+## 快速部署
+
+### 01 · 安装面板
+
+在 Linux 服务器中执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Angasky/mxioc-vpn-manager/main/install.sh | sudo bash
 ```
 
-完成安装后，使用 `vpn` 打开管理菜单、升级或重置账号。
+### 02 · 选择部署方式
 
-**第一次使用：** 新建订阅 → 导入链接或接入服务器 → 分配策略组 → 复制订阅到客户端。
+按安装菜单选择 **域名 HTTPS**、**IP 部署** 或 **极速安装**，完成后访问脚本返回的管理地址。
+
+### 03 · 开始使用
+
+**新建订阅 → 导入链接 / 接入服务器 → 分配策略组 → 导入客户端**
+
+> [!TIP]
+> 下次维护只需输入 `vpn`，即可打开管理菜单、升级面板或重置管理员账号。
 
 <details>
-<summary>部署前准备</summary>
+<summary><strong>展开部署前准备</strong></summary>
 
-- 使用支持 systemd 的 Linux，以及 root 或 sudo 权限。
-- 域名 HTTPS 模式：先解析域名，使用 Cloudflare 时切换为「仅 DNS」，放行证书验证所需端口。
-- 创建 TLS / HY2 节点需要远端证书和私钥；HY2 还需放行对应 UDP 端口。
+- 使用支持 systemd 的 Linux，准备 root 或 sudo 权限。
+- 域名 HTTPS 模式先完成 DNS 解析；Cloudflare 域名使用「仅 DNS」，并放行证书验证所需端口。
+- 创建 TLS / HY2 节点需准备远端证书与私钥，HY2 需放行对应 UDP 端口。
+- 接入已有面板时填写现有账号，具体操作见[服务器节点工作流](docs/server-node-workflow.md)。
 
 </details>
 
-## 按需阅读
+## 使用文档
 
-[服务器与节点](docs/server-node-workflow.md) · [客户端兼容](docs/client-compatibility.md) · [流量与倍率](docs/traffic-multiplier-bandwidth.md)
-
-[Snell](docs/snell.md) · [HY2 连通测试](docs/hy2-testing.md) · [多入口主备](docs/multi-entry-failover.md) · [性能](docs/performance.md)
+| 开始配置 | 进阶使用 |
+| :--- | :--- |
+| [服务器与节点工作流](docs/server-node-workflow.md) | [流量倍率与节点限速](docs/traffic-multiplier-bandwidth.md) |
+| [客户端兼容与导入](docs/client-compatibility.md) | [多入口主备与链路](docs/multi-entry-failover.md) |
+| [Snell 节点说明](docs/snell.md) | [性能与测试说明](docs/performance.md) |
+| [HY2 实际连通测试](docs/hy2-testing.md) | [版本更新日志](CHANGELOG.md) |
 
 <details>
-<summary>开发与历史参考</summary>
+<summary><strong>开发验证与历史参考</strong></summary>
 
-回归测试：`python -m unittest discover -s tests`。真实内核测试方法见 [HY2 测试文档](docs/hy2-testing.md)。
+```bash
+python -m unittest discover -s tests
+```
 
-[历史完整说明](docs/legacy-reference.md)保留此前的部署与实现细节；部分描述对应旧版本，请结合更新日志阅读。
+真实内核测试的环境变量与运行方法见 [HY2 测试文档](docs/hy2-testing.md)。
+
+[旧版完整说明](docs/legacy-reference.md)保留历史细节，部分内容对应旧版本，请结合更新日志阅读。
 
 </details>
 
 ---
 
-<p align="center"><sub>MXIOC · 简化管理，专注连接。</sub></p>
+<p align="center">
+  <strong>让复杂的配置，回到简单的操作。</strong><br><br>
+  <a href="https://github.com/Angasky/mxioc-vpn-manager/issues">反馈问题</a> ·
+  <a href="https://github.com/Angasky/mxioc-vpn-manager/issues/new">提出建议</a> ·
+  <a href="CHANGELOG.md">查看更新</a>
+</p>
