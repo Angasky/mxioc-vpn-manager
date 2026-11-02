@@ -864,6 +864,18 @@ code {
 }
 .batch-server-group { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .batch-server-group h4 { margin: 0 0 8px; overflow-wrap: anywhere; }
+#batchServerForm { display:flex; flex-direction:column; gap:8px; }
+#batchServerForm > p { margin:0; }
+#batchServerSelect { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); max-height:150px; overflow:auto; gap:6px; padding:6px; border:1px solid var(--border); border-radius:8px; }
+#batchServerSelect .choice { padding:8px; min-width:0; }
+#batchServerSelect .batch-choice-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#batchServerRows { max-height:32dvh; overflow:auto; overscroll-behavior:contain; border:1px solid var(--border); border-radius:8px; padding:0 8px; }
+.batch-server-group summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; }
+.batch-server-group summary span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.batch-server-group { margin:6px 0; padding:8px; }
+#batchServerResults { max-height:100px; overflow:auto; }
+#batchServerSubmit { position:sticky; bottom:0; flex-shrink:0; }
+@media(max-width:600px) { #batchServerSelect { max-height:120px; grid-template-columns:1fr; } }
 .batch-choice-text { min-width: 0; overflow-wrap: anywhere; }
 .checks {
   display: grid;
@@ -2310,7 +2322,8 @@ async function batchServerImport() {
     <p>当前订阅：${esc(S.data?.profile?.name || '')}</p>
     <p class="hint">可多选服务器，下方按服务器展示全部入站。勾选节点后，为当前订阅分配独立 UUID / 密码，沿用额度、倍率和到期时间，不清零或续期。</p>
     <p id="batchSubscriptionInfo" class="hint"></p>
-    <h4>服务器（可多选）</h4><label class="inlinecheck"><input id="batchServersAll" type="checkbox" disabled>全选服务器</label>
+    <div class="toolbar"><input id="batchServerSearch" placeholder="搜索服务器名称、IP、内核" aria-label="搜索服务器"><span id="batchServerCount" class="pill"></span></div>
+    <label class="inlinecheck"><input id="batchServersAll" type="checkbox" disabled>全选服务器（包含搜索未显示项）</label>
     <div id="batchServerSelect" class="checks" role="group" aria-label="选择服务器">正在读取服务器…</div>
     <button id="batchServerLoad" type="button" class="btn" disabled>刷新所选服务器节点</button>
     <p class="hint">勾选服务器后自动加载；最多同时读取 3 台服务器。一次最多导入 50 个节点。</p>
@@ -2318,15 +2331,20 @@ async function batchServerImport() {
     <div id="batchServerRows"></div><div id="batchServerError" class="error" role="alert"></div>
     <p id="batchServerProgress" role="status" aria-live="polite"></p><div id="batchServerResults"></div>
     <button id="batchServerSubmit" class="btn primary" disabled>导入所选节点并绑定订阅</button></form>`);
-  const form = $('batchServerForm'), groups = new Map(), selectedServers = new Set(), selected = new Set(), queue = [];
+  const form = $('batchServerForm'), groups = new Map(), selectedServers = new Set(), selected = new Set(), queue = [], expanded = new Set();
   let busy = false, activeLoads = 0;
   const key = (serverId, inboundId) => JSON.stringify([serverId, inboundId]);
-  const eligible = row => ['vless','vmess','trojan','hysteria2','tuic'].includes(row.protocol) && row.enable !== false;
+  const eligible = row => ['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol) && row.enable !== false;
   const t = S.data?.profile?.traffic || {};
   $('batchSubscriptionInfo').textContent = `总额度：${t.total == null ? '不限' : formatBytes(t.total)} · 到期：${t.expire ? new Date(t.expire*1000).toLocaleString('zh-CN') : '长期有效'}。未设置额度或日期时，导入后先统计用量，可在“流量与有效期”继续设置。`;
   const selectable = group => group.status === 'loaded' ? group.rows.filter(eligible) : [];
   const update = () => {
     if (!form.isConnected) return;
+    $('batchServerCount').textContent = `${groups.size} 台 · 已选 ${selectedServers.size} 台 / ${selected.size} 个节点`;
+    form.querySelectorAll('[data-batch-server-group]').forEach(item=>{
+      const group=groups.get(item.dataset.batchServerGroup);
+      if(group?.status==='loaded')item.querySelector('summary span:last-child').textContent=`${group.rows.length} 个入站 · 已选 ${group.rows.filter(row=>selected.has(key(group.server.id,row.id))).length} · 展开`;
+    });
     const available = [...selectedServers].flatMap(id=>selectable(groups.get(id)).map(row=>key(id,row.id)));
     $('batchServerSubmit').disabled = busy || !selected.size;
     $('batchServerSubmit').textContent = busy ? '正在导入…' : `导入所选 ${selected.size} 个节点并绑定订阅`;
@@ -2352,11 +2370,11 @@ async function batchServerImport() {
     const scroll = new Map([...form.querySelectorAll('[data-batch-node-list]')].map(n=>[n.dataset.batchNodeList,n.scrollTop]));
     $('batchServerRows').innerHTML = [...groups.values()].filter(g=>selectedServers.has(g.server.id)).map(group=>{
       const {server,rows,status,error}=group;
-      return `<section class="batch-server-group" data-batch-server-group="${esc(server.id)}"><h4>${esc(server.name)} · ${esc(server.host)}</h4>
+      return `<details class="batch-server-group" data-batch-server-group="${esc(server.id)}" ${expanded.has(server.id) ? 'open' : ''}><summary><span title="${esc(server.name)} · ${esc(server.host)}">${esc(server.name)} · ${esc(server.host)}</span><span>${status === 'loaded' ? `${rows.length} 个入站 · 已选 ${rows.filter(row=>selected.has(key(server.id,row.id))).length}` : status === 'error' ? '加载失败' : '加载中'} · 展开</span></summary>
         ${status === 'loading' || status === 'queued' ? `<p class="hint">${status === 'loading' ? '正在加载节点…' : '等待加载…'}</p>` : status === 'error' ? `<p class="error">${esc(error)}</p>` : `<p class="hint">共 ${rows.length} 个入站</p>
         <label class="inlinecheck"><input type="checkbox" data-batch-group-all="${esc(server.id)}">全选此服务器可用入站</label>
         <div class="checks" data-batch-node-list="${esc(server.id)}">${rows.map(row=>`<label class="choice"><input type="checkbox" class="batchServerChoice" value="${esc(key(server.id,row.id))}" ${eligible(row) ? '' : 'disabled data-unsupported="true"'}><span class="batch-choice-text">${esc(row.remark || '未命名')} · ${esc(row.protocol)} : ${esc(row.port)}${eligible(row) ? '' : row.enable === false ? '（入站已停用）' : '（不支持独立用户）'}</span></label>`).join('') || '<p class="hint">此服务器暂无入站。</p>'}</div>`}
-        <button type="button" class="btn small" data-batch-reload="${esc(server.id)}">${status === 'error' ? '重试加载' : '刷新节点'}</button></section>`;
+        <button type="button" class="btn small" data-batch-reload="${esc(server.id)}">${status === 'error' ? '重试加载' : '刷新节点'}</button></details>`;
     }).join('') || '<p class="hint">请勾选上方服务器，节点会在此处分组显示。独立内核仅展示总控受管入站。</p>';
     form.querySelectorAll('[data-batch-node-list]').forEach(n=>n.scrollTop=scroll.get(n.dataset.batchNodeList)||0);
     update();
@@ -2382,7 +2400,7 @@ async function batchServerImport() {
     group.rows=[];group.status='queued';group.error='';queue.push(group);renderGroups();pump();
   };
   const chooseServer = (id, checked) => {
-    if(checked){selectedServers.add(id);load(id);}
+    if(checked){if(!selectedServers.size)expanded.add(id);selectedServers.add(id);load(id);}
     else {selectedServers.delete(id);for(const row of groups.get(id).rows)selected.delete(key(id,row.id));}
     renderGroups();
   };
@@ -2398,6 +2416,15 @@ async function batchServerImport() {
   $('batchServerSelect').onchange = event=>{
     if(busy || !event.target.matches('.batchServerSource'))return;
     chooseServer(event.target.value,event.target.checked);
+  };
+  $('batchServerRows').addEventListener('toggle',event=>{
+    const item=event.target;
+    if(!item.hasAttribute('data-batch-server-group') || !item.isConnected)return;
+    if(item.open)expanded.add(item.dataset.batchServerGroup);else expanded.delete(item.dataset.batchServerGroup);
+  },true);
+  $('batchServerSearch').oninput=event=>{
+    const query=event.target.value.trim().toLowerCase();
+    form.querySelectorAll('.batchServerSource').forEach(input=>input.closest('label').classList.toggle('hidden',!input.closest('label').textContent.toLowerCase().includes(query)));
   };
   $('batchServersAll').onchange=()=>{
     const checked=$('batchServersAll').checked;

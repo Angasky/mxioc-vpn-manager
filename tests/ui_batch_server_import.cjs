@@ -38,7 +38,7 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
     throw Error('unexpected '+url);
    };
   });
-  const click=async selector=>{await page.$eval(selector,n=>n.scrollIntoView({block:'center',behavior:'instant'}));await page.click(selector);};
+  const click=async selector=>{await page.$eval(selector,n=>{for(let parent=n.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;n.scrollIntoView({block:'center',behavior:'instant'});});await page.click(selector);};
   const waitNodes=count=>page.waitForFunction(n=>document.querySelectorAll('.batchServerChoice').length===n,{},count);
   for(const theme of ['high','low','pink'])for(const width of [1440,390]){
    await page.setViewport({width,height:1000});
@@ -89,6 +89,15 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
   assert((await page.$eval('#batchServerError',n=>n.textContent)).includes('50'));
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await click('#batchNodesClear');assert.equal(await page.$$eval('.batchServerChoice:checked',nodes=>nodes.length),0);
-  assert.deepEqual(errors,[]);console.log('PASS: multi-server grouping, duplicate inbound IDs, scoped chunks/retry, 3-worker loading, per-server failure recovery, 50-node cap; three desktop/mobile themes');
+  await page.evaluate(async()=>{window.serverCount=80;window.manyNodes=false;await batchServerImport();});
+  assert.equal(await page.$$eval('.batchServerSource',nodes=>nodes.length),80);
+  assert(await page.$eval('#batchServerSelect',node=>node.getBoundingClientRect().height<=152));
+  await click('.batchServerSource[value="server-1"]');await waitNodes(6);
+  await page.type('#batchServerSearch','198.51.100.80');
+  assert.equal(await page.$$eval('#batchServerSelect label:not(.hidden)',nodes=>nodes.length),1);
+  assert(await page.$eval('.batchServerSource[value="server-1"]',node=>node.checked),'search preserves hidden selections');
+  await click('.batchServerSource[value="server-80"]');await waitNodes(7);
+  assert(await page.$eval('#batchServerRows',node=>node.getBoundingClientRect().height<=innerHeight*.32+2));
+  assert.deepEqual(errors,[]);console.log('PASS: multi-server grouping, duplicate inbound IDs, scoped chunks/retry, 3-worker loading, per-server failure recovery, 50-node cap; three desktop/mobile themes; 80-server bounded list and search preserves selection');
  }finally{await browser.close();await new Promise(resolve=>host.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});
