@@ -235,6 +235,42 @@ class RemoteUserAdapterTests(unittest.TestCase):
     setUp = remote_fixture.RemoteManagerTests.setUp
     tearDown = remote_fixture.RemoteManagerTests.tearDown
 
+    def test_modern_client_routes_preserve_hy2_auth_and_scope(self):
+        row={'id':1,'port':443,'protocol':'hysteria','settings':{'version':2,'clients':[]}}
+        client=users.new_user(row)
+        binding={'inboundId':1,'userEmail':client['email'],'userHash':users.user_identity(client),'identityHash':users.endpoint_identity(row)}
+        api=Mock()
+        def request(path,payload=None,**kwargs):
+            if path=='panel/api/inbounds/list':return [row]
+            if '/inbounds/' in path:raise remote.PanelRouteMissing('HTTP 404')
+            if '/clients/get/' in path:return {'inboundIds':[1]}
+            return None
+        api.request.side_effect=request
+        self.manager.with_panel=lambda sid,fn:fn(api,self.manager.record(self.identity))
+        self.manager.subscription_user(self.identity,binding,'add',client)
+        path,payload=api.request.call_args.args
+        self.assertEqual(path,'panel/api/clients/add')
+        self.assertTrue(api.request.call_args.kwargs['json_body'])
+        self.assertEqual(payload,{'client':client,'inboundIds':[1]})
+        self.assertTrue(payload['client']['auth'])
+        row['settings']['clients']=[client]
+        self.manager.subscription_user(self.identity,binding,'pause')
+        self.assertEqual(api.request.call_args.args[0],'panel/api/clients/update/'+client['email'])
+        self.assertFalse(api.request.call_args.args[1]['enable'])
+        self.manager.subscription_user(self.identity,binding,'remove')
+        self.assertEqual(api.request.call_args.args,('panel/api/clients/'+client['email']+'/detach',{'inboundIds':[1]}))
+
+    def test_modern_routes_never_replay_ambiguous_writes_or_pause_shared_global_client(self):
+        row={'id':1,'protocol':'hysteria'}; client={'email':'owned','auth':'fixture'}
+        api=Mock(); api.request.side_effect=TimeoutError('timeout after apply')
+        with self.assertRaises(TimeoutError):remote.mutate_panel_user(api,row,{'userEmail':'owned'},'add',client,{})
+        self.assertEqual(api.request.call_count,1)
+        api.request.reset_mock()
+        api.request.side_effect=lambda path,*a,**k: {'inboundIds':[1,2]} if '/clients/get/' in path else (_ for _ in ()).throw(remote.PanelRouteMissing('404'))
+        with self.assertRaisesRegex(ValueError,'多个入站'):
+            remote.mutate_panel_user(api,row,{'userEmail':'owned'},'pause',client,{})
+        self.assertEqual(api.request.call_count,2)
+
     def test_panel_mutates_only_client_endpoint_never_rewrites_inbound(self):
         row = {'id': 1, 'port': 4443, 'protocol': 'vless', 'settings': {'clients': []}, 'streamSettings': {}}
         client = users.new_user(row)

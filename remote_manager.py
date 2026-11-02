@@ -312,17 +312,17 @@ class PanelAPI:
         self.api_prefix = self.session.get("api_prefix", "panel/api")
         self.web_prefix = self.session.get("web_prefix", "panel")
 
-    def request(self, path, payload=None, *, method=None, bearer=True):
+    def request(self, path, payload=None, *, method=None, bearer=True, json_body=False):
         try:
-            return self._request(path, payload, method=method, bearer=bearer)
+            return self._request(path, payload, method=method, bearer=bearer, json_body=json_body)
         except PanelSessionExpired:
             # Retry only an explicit authentication rejection, never a timeout,
             # HTML response, CSRF error or an ambiguous mutation failure.
             if path in ("login", "csrf-token"):
                 raise ValueError("远端面板认证失败，请核对账号、密码和双因素验证设置") from None
-            return self._request(path, payload, method=method, bearer=bearer)
+            return self._request(path, payload, method=method, bearer=bearer, json_body=json_body)
 
-    def _request(self, path, payload=None, *, method=None, bearer=True):
+    def _request(self, path, payload=None, *, method=None, bearer=True, json_body=False):
         if path == "login" and self.session.get("login_blocked_until", 0) > time.monotonic():
             raise ValueError("远端面板登录失败后已暂停重试 60 秒，请检查账号、密码及双因素验证；更新连接凭证可立即重试")
         if path == "login" and self.logged_in and payload == {"username": self.record["panelUser"], "password": self.password}:
@@ -382,10 +382,14 @@ class PanelAPI:
                 headers["Authorization"] = "Bearer " + self.token
             body = None
             if payload is not None:
-                body = urlencode({key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list))
+                if json_body:
+                    body = json.dumps(payload, ensure_ascii=False).encode()
+                    headers["Content-Type"] = "application/json"
+                else:
+                    body = urlencode({key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list))
                                   else str(value).lower() if isinstance(value, bool) else value
                                   for key, value in payload.items()}).encode()
-                headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
             remote_path = path.lstrip("/")
             if remote_path.startswith("panel/api/"):
                 remote_path = self.api_prefix + remote_path[len("panel/api"):]
@@ -413,6 +417,8 @@ class PanelAPI:
                 if response.status == 404 and path == "panel/api/inbounds/list" and install_type(self.record) == "x-ui" and self.api_prefix == "panel/api":
                     self.api_prefix, self.web_prefix = "xui/API", "xui"
                     return self.request(path, payload, method=method, bearer=False)
+                if response.status == 404:
+                    raise PanelRouteMissing("3x-ui 接口 HTTP 404，请检查面板版本与接口路径")
                 raise ValueError(f"3x-ui 接口 HTTP {response.status}，请检查面板状态、访问路径和 API 令牌")
             try:
                 result = json.loads(raw)
@@ -442,6 +448,36 @@ class PanelAPI:
 
 class PanelSessionExpired(ValueError):
     pass
+
+
+class PanelRouteMissing(ValueError):
+    """An explicit HTTP 404; never inferred from a timeout or error text."""
+    pass
+
+
+def mutate_panel_user(api, row, binding, operation, account, payload):
+    """Keep old panels compatible; modern panels moved clients out of inbounds."""
+    field = 'auth' if row['protocol'] == 'hysteria' or row['protocol'] == 'hysteria2' and account.get('auth') else 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
+    credential = quote(str(account.get(field, '')), safe='')
+    legacy = ('panel/api/inbounds/addClient' if operation == 'add' else
+              f"panel/api/inbounds/{row['id']}/delClient/{credential}" if operation == 'remove' else
+              'panel/api/inbounds/updateClient/' + credential)
+    try:
+        return api.request(legacy, {} if operation == 'remove' else payload)
+    except PanelRouteMissing:
+        # A missing route has not applied the mutation. No fallback for an
+        # ambiguous write failure, authentication denial or application error.
+        pass
+    email = quote(binding['userEmail'], safe='')
+    if operation == 'add':
+        return api.request('panel/api/clients/add', {'client': account, 'inboundIds': [row['id']]}, json_body=True)
+    if operation == 'remove':
+        # Scoped detach never deletes a global client attached by another panel.
+        return api.request('panel/api/clients/' + email + '/detach', {'inboundIds': [row['id']]}, json_body=True)
+    details = api.request('panel/api/clients/get/' + email)
+    if (not isinstance(details, dict) or details.get('inboundIds') != [row['id']]):
+        raise ValueError('新版面板用户关联了多个入站，停止全局启停以免影响其他用户')
+    return api.request('panel/api/clients/update/' + email, account, json_body=True)
 
 
 class RemoteManager:
@@ -1343,14 +1379,7 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                     payload = {'id': row['id'], 'protocol': row['protocol'],
                                'settings': json.dumps({'clients': [client if operation == 'add' else current]})}
                     account = current or client
-                    field = 'auth' if row['protocol'] == 'hysteria' or row['protocol'] == 'hysteria2' and account.get('auth') else 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
-                    identity = quote(str(account.get(field, '')), safe='')
-                    if operation == 'add' and current is None:
-                        api.request('panel/api/inbounds/addClient', payload)
-                    elif operation == 'remove':
-                        api.request(f"panel/api/inbounds/{row['id']}/delClient/{identity}", {})
-                    elif operation in ('pause', 'resume'):
-                        api.request('panel/api/inbounds/updateClient/' + identity, payload)
+                    mutate_panel_user(api, row, binding, operation, account, payload)
                 else:
                     body = prepare_inbound({**row, 'settings': model})
                     api.request('panel/api/inbounds/update/' + str(row['id']), body)

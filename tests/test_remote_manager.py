@@ -550,7 +550,7 @@ class PanelTunnelTests(unittest.TestCase):
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
-                received.update(path=self.path, bearer=self.headers.get("Authorization"), host=self.headers.get("Host"),
+                received.update(path=self.path, contentType=self.headers.get('Content-Type'), bearer=self.headers.get("Authorization"), host=self.headers.get("Host"),
                                 body=self.rfile.read(int(self.headers["Content-Length"])).decode())
                 body = b'{"success":true,"obj":{"ok":true}}'
                 self.send_response(200)
@@ -577,6 +577,10 @@ class PanelTunnelTests(unittest.TestCase):
             self.assertEqual(received["host"], "198.51.100.1:2053")
             self.assertIn("enable=true", received["body"])
             self.assertIn("settings=", received["body"])
+            payload={'client':{'email':'fixture','auth':'special+/ 密码'},'inboundIds':[1]}
+            api.request('panel/api/clients/add',payload,json_body=True)
+            self.assertEqual(received['contentType'],'application/json')
+            self.assertEqual(json.loads(received['body']),payload)
         finally:
             httpd.shutdown()
             httpd.server_close()
