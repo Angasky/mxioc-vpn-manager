@@ -1388,7 +1388,7 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                 return {'removed': True}
             runtime = {}
             owned = find_user(row, binding)
-            if install_type(record) == 'x-panel' and operation == 'read' and owned.get('enable') is not False:
+            if (install_type(record) == 'x-panel' or install_type(record) in PANEL_TYPES and row.get('protocol') in ('hysteria', 'hysteria2')) and operation == 'read' and owned.get('enable') is not False:
                 from panel_user_runtime import sync_user
                 runtime = sync_user(self, api, record, row, owned)
             # Export exactly the owned user, even while other users are present.

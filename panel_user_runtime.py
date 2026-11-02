@@ -43,10 +43,10 @@ def runtime_status(output, protocol, client):
         if len(matches) != 1:
             return 'mismatch'
         account = matches[0].get('account', {})
-        key = 'password' if protocol == 'trojan' else 'id'
+        key = 'auth' if protocol in ('hysteria', 'hysteria2') else 'password' if protocol == 'trojan' else 'id'
         if key not in account:
             return 'unsupported'  # Older CLIs can return an opaque account blob.
-        actual, expected = account.get(key), client.get(key)
+        actual, expected = account.get(key), (client.get('auth') or client.get('password')) if key == 'auth' else client.get(key)
         if key == 'id':
             actual, expected = str(uuid.UUID(actual)), str(uuid.UUID(expected))
         if actual != expected:
@@ -86,6 +86,10 @@ def check_authorized(row, client):
 def sync_user(manager, api, record, row, client):
     """Only repair a confirmed missing user; never replace a conflicting one."""
     check_authorized(row, client)
+    if row.get('protocol') in ('hysteria', 'hysteria2'):
+        from shared_users import settings
+        if int(settings(row).get('version', 2)) != 2:
+            raise ValueError('仅支持 HY2 运行用户同步，不处理 Hysteria v1')
     try:
         config = api.request('panel/api/server/getConfigJson')
     except ValueError as exc:
@@ -102,7 +106,7 @@ def sync_user(manager, api, record, row, client):
     if not isinstance(config, dict):
         raise ValueError('X-Panel 内核配置格式无效，无法确认用户同步')
     address = api_address(config)
-    if not address or row.get('protocol') not in ('vless', 'vmess', 'trojan') or not row.get('tag'):
+    if not address or row.get('protocol') not in ('vless', 'vmess', 'trojan', 'hysteria', 'hysteria2') or not row.get('tag'):
         return {'runtimeVerified': None}
     discovery = 'for candidate in '+ ' '.join(shlex.quote(p) for p in BINARIES) + '; do if [ -x "$candidate" ]; then printf "%s" "$candidate"; break; fi; done'
     code, output = manager.execute(api.ssh, record, discovery, timeout=15)
@@ -128,10 +132,13 @@ def sync_user(manager, api, record, row, client):
     # Build a one-user addition. adu never replaces the inbound or its peers.
     from shared_users import settings
     runtime_client = dict(client)
+    if row['protocol'] in ('hysteria', 'hysteria2'):
+        runtime_client['auth'] = client.get('auth') or client.get('password') or ''
     if row['protocol'] == 'vless' and runtime_client.get('flow'):
         runtime_client['flow'] = runtime_client['flow'].replace('-udp443', '')
     model = {'inbounds': [{'tag': row['tag'], 'listen': '127.0.0.1', 'port': row['port'],
-                           'protocol': row['protocol'], 'settings': {**settings(row), 'clients': [runtime_client]}}]}
+                           'protocol': 'hysteria' if row['protocol'] == 'hysteria2' else row['protocol'],
+                           'settings': {**settings(row), 'clients': [runtime_client]}}]}
     encoded = base64.b64encode(json.dumps(model).encode()).decode()
     script = '''set -eu
 candidate=$(mktemp /tmp/mxioc-user-sync.XXXXXXXX)

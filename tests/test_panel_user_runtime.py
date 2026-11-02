@@ -95,3 +95,20 @@ class PanelUserRuntimeTests(unittest.TestCase):
             user=shared_users.new_user(row)
             self.assertEqual(user.get('flow',''),flow);self.assertNotEqual(user['id'],self.peer['id'])
             self.assertEqual(user['expiryTime'],0);self.assertEqual(user['totalGB'],0)
+
+    def test_hy2_auth_user_is_repaired_and_never_treated_as_uuid(self):
+        self.row.update(protocol='hysteria',settings={'version':2,'clients':[]})
+        self.client={'email':'hy2-owned','auth':'hy2-example-password','enable':True}
+        live=False;captured=[]
+        def execute(ssh,record,script,**kwargs):
+            nonlocal live
+            if script.startswith('for candidate'):return 0,runtime.BINARIES[0]
+            if ' api inbounduser ' in script:return 0,json.dumps({'users':[{'email':self.client['email'],'account':{'auth':self.client['auth']}}] if live else []})
+            if ' api adu ' in script:
+                captured.append(json.loads(base64.b64decode(re.search(r"printf '%s' ([A-Za-z0-9+/=]+)",script)[1])))
+                live=True;return 0,'Added 1 user(s)'
+            raise AssertionError(script)
+        self.manager.execute.side_effect=execute
+        self.assertTrue(self.sync()['runtimeRepaired'])
+        self.assertEqual(captured[0]['inbounds'][0]['settings']['clients'],[self.client])
+        self.assertFalse(self.sync()['runtimeRepaired']);self.assertEqual(len(captured),1)

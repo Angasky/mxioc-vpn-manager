@@ -612,7 +612,7 @@ def binding_record_token(profile_id, binding):
 
 
 def public_binding_records(record):
-    return [{**copy.deepcopy(binding), "recordIndex": index,
+    return [{**{k:copy.deepcopy(v) for k,v in binding.items() if k != 'pendingClient'}, "recordIndex": index,
              "recordToken": binding_record_token(record.get("id", ""), binding)}
             for index, binding in enumerate(record.get("remoteNodes", []))]
 
@@ -1085,6 +1085,7 @@ def import_owned_user_links(record, binding, links):
             added = 1
         write_config(doc, 'subscription-user-import')
         binding['importedNames'] = [node['name']]
+        binding.pop('pendingClient', None)
         save_profiles(load_profiles())
         return {'added': added, 'existing': 1-added, 'bound': True,
                 'enforcementEnabled': bool((record.get('traffic') or {}).get('enforce'))}
@@ -1252,7 +1253,15 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
             binding = own[0]
             current = find_user(row, binding, missing_ok=binding.get('status') == 'provisioning')
             if current is None:
-                raise ValueError('上次创建未在远端找到用户，请删除该待核对绑定记录后重试；不会重复创建 UUID')
+                if not binding.get('pendingClient'):
+                    raise ValueError('旧版待核对记录未保存恢复凭据，请核对远端用户后移除该历史记录；不会盲目分配第二份身份')
+                client = json.loads(manager.secret(binding, 'pendingClient'))
+                if not isinstance(client, dict) or user_identity(client) != binding['userHash']:
+                    raise ValueError('待创建用户恢复凭据与归属不一致，停止重试')
+                try:
+                    manager.subscription_user(server_id, binding, 'add', client)
+                except Exception:
+                    raise ValueError('原用户创建尚未确认，已保留同一份加密身份，请在此入站重试') from None
             with LOCK:
                 binding.update(status='active', error='')
                 save_profiles(load_profiles())
@@ -1262,6 +1271,7 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
             binding = {'scope': 'user', 'serverId': server_id, 'inboundId': inbound_id,
                        'userEmail': client['email'], 'userHash': user_identity(client),
                        'identityHash': endpoint_identity(row), 'name': row.get('remark', ''),
+                       'pendingClient': manager.seal(json.dumps(client, ensure_ascii=False)),
                        'port': row['port'], 'status': 'provisioning', 'boundAt': int(time.time()),
                        'up': 0, 'down': 0, 'counterSource': 'pending',
                        'multiplierUnits': (record.get('traffic') or {}).get('multiplierUnits', 1000), 'error': ''}
@@ -1431,7 +1441,10 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                     user = find_user(row, binding, missing_ok=True)
                     if user is None:
                         with LOCK:
-                            binding.update(status='missing', error='远端订阅用户已不存在')
+                            if binding.get('status') == 'provisioning':
+                                binding['error'] = binding.get('error') or '用户创建尚未确认，请在同一入站重试'
+                            else:
+                                binding.update(status='missing', error='远端订阅用户已不存在')
                         continue
                     binding.update(status='active', error='')
                 except ValueError as exc:
@@ -1825,7 +1838,7 @@ def save_remote_server(payload):
         identity = str(payload.get("id", ""))
         if identity:
             bindings = [b for r in load_profiles()["profiles"] for b in r.get("remoteNodes", [])
-                        if b["serverId"] == identity and b.get("status") == "active"]
+                        if b["serverId"] == identity and b.get("status") in ("active", "provisioning")]
             if bindings:
                 old = remote_manager().record(identity)
                 for key in ("host", "sshPort", "installType", "connectionMode", "domain", "panelAddress"):
@@ -1906,7 +1919,7 @@ def create_profile(payload):
     if template_id == "blank":
         doc = empty_profile_config()
     else:
-        if any(b.get("status") == "active" for b in profile_record(template_id).get("remoteNodes", [])):
+        if any(b.get("status") in ("active", "provisioning") for b in profile_record(template_id).get("remoteNodes", [])):
             raise ValueError("该模板拥有服务器专属节点，不能复制凭证供其他订阅共用；请创建空白订阅并创建新专属节点")
         doc = copy.deepcopy(get_cached_config(current_files(template_id)[0])[0])
     path = PROFILES_DIR / f"{profile_id}.yaml"
@@ -1956,7 +1969,7 @@ def update_profile(payload):
 
 @profile_locked
 def delete_profile(profile_id):
-    if any(b.get("status") == "active" for b in profile_record(profile_id).get("remoteNodes", [])):
+    if any(b.get("status") in ("active", "provisioning") for b in profile_record(profile_id).get("remoteNodes", [])):
         raise ValueError("订阅仍拥有服务器节点，请先删除专属入站，不能丢弃限制关联")
     data = load_profiles()
     record = next((x for x in data["profiles"] if x["id"] == profile_id), None)
@@ -3032,7 +3045,7 @@ def node_to_uri(node):
         auth = quote(str(node.get("uuid", "")), safe="") + ":" + quote(str(node.get("password", "")), safe="")
         return f"tuic://{auth}@{address}?{urlencode(query)}#{name}"
     if node_type == "hysteria2":
-        if node.get("sni"): query["sni"] = node["sni"]
+        if node.get("sni") or node.get("servername"): query["sni"] = node.get("sni") or node["servername"]
         if node.get("alpn"): query["alpn"] = ",".join(node["alpn"] if isinstance(node["alpn"], list) else [str(node["alpn"])])
         if node.get("skip-cert-verify"): query["insecure"] = "1"
         if node.get("obfs"): query["obfs"] = node["obfs"]
@@ -3041,7 +3054,7 @@ def node_to_uri(node):
             if node.get(source): query[target] = re.sub(r"\s*[Mm][Bb][Pp][Ss]\s*$", "", str(node[source]))
         if node.get("fingerprint"): query["pinSHA256"] = node["fingerprint"].replace(":", "")
         suffix = "?" + urlencode(query) if query else ""
-        return f"hysteria2://{quote(str(node.get('password') or node.get('auth') or ''), safe='')}@{address}{suffix}#{name}"
+        return f"hysteria2://{quote(str(node.get('password') or node.get('auth') or ''), safe='')}@{address}/{suffix}#{name}"
     if node_type == "trojan":
         if node.get("sni") or node.get("servername"): query["sni"] = node.get("sni") or node.get("servername")
         query["security"] = "tls"

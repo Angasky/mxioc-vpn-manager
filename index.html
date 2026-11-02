@@ -902,6 +902,9 @@ code {
   cursor: pointer;
   transition: all 0.12s ease;
 }
+.shared-profile { min-width:0; overflow-wrap:anywhere; }
+.shared-profile[hidden] { display:none !important; }
+.shared-profile span { min-width:0; }
 .choice:hover {
   background: var(--bg-input);
   border-color: rgb(var(--accent-rgb) / 0.2);
@@ -2815,23 +2818,33 @@ async function importRemoteLinks(links, source) {
 
 function remoteNodeLinks(id) {
   const row = S.remoteRows.find(x => x.id === id); if (!row) return;
-  if (!['vless','vmess','trojan','hysteria2','tuic'].includes(row.protocol)) return remoteNodeLegacyLinks(id);
-  const profile = S.profile, serverId = S.serverId;
-  openModal('添加独立订阅用户', `<form id="sharedUserForm"><p>当前订阅：${esc(S.data?.profile?.name || '')}<br>共用入站：${esc(row.remark || row.protocol)} : ${row.port}</p>
-    <p class="hint">自动分配独立 UUID / 密码并导入当前订阅。重复添加会复用本订阅已有用户。其他订阅和入站端口保持不变；原订阅的旧版专属绑定会先结算再迁移，保留 UUID、已用量及订阅链接。</p>
-    <p class="hint">添加后请在“流量与有效期”启用强制限制。共用用户暂不支持带宽限制；独立内核需要可用的 StatsService，缺少支持时会提示错误。</p>
-    <div id="sharedUserError" class="error" role="alert"></div><button id="sharedUserSave" class="btn primary">添加 / 迁移当前订阅用户</button></form>`);
+  if (!['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol)) return remoteNodeLegacyLinks(id);
+  const profile = S.profile, serverId = S.serverId, selected = new Set([profile]), done = new Set();
+  const profiles = S.profiles.slice(), results = [];
+  openModal('节点批量加入订阅', `<form id="sharedUserForm"><p>${esc(row.remark || row.protocol)} · ${esc(row.port)}</p>
+    <p class="hint">为每份订阅建立独立用户：VLESS / VMess 使用独立 UUID，HY2 使用独立认证密码。自动启用独立流量计量和到期撤销，保留已有套餐、用量和有效期；重复添加复用本订阅用户。</p>
+    <div class="toolbar"><input id="sharedProfileSearch" type="search" placeholder="搜索订阅" aria-label="搜索订阅"><button id="sharedProfilesAll" type="button" class="btn">全选筛选结果</button><button id="sharedProfilesClear" type="button" class="btn">清空选择</button></div>
+    <div id="sharedProfileList" class="checks" style="max-height:min(42vh,320px);overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px">${profiles.map(p=>`<label class="choice shared-profile" data-profile="${esc(p.id)}"><input type="checkbox" class="sharedProfileChoice" value="${esc(p.id)}" ${p.id===profile?'checked':''}><span>${esc(p.name)}</span></label>`).join('')}</div>
+    <p id="sharedUserProgress" class="hint" aria-live="polite"></p><div id="sharedUserResults" style="max-height:180px;overflow:auto" aria-live="polite"></div>
+    <div id="sharedUserError" class="error" role="alert"></div><button id="sharedUserSave" class="btn primary">导入所选订阅</button></form>`);
+  const form=$('sharedUserForm'), search=$('sharedProfileSearch');let busy=false;
+  const visible=p=>String(p.name||p.id).toLowerCase().includes(search.value.trim().toLowerCase());
+  const update=()=>{if(!form.isConnected)return;form.querySelectorAll('.shared-profile').forEach(label=>{const p=profiles.find(p=>p.id===label.dataset.profile);label.hidden=!visible(p);const input=label.querySelector('input');input.checked=selected.has(p.id);input.disabled=busy||done.has(p.id);});$('sharedUserSave').disabled=busy||![...selected].some(id=>!done.has(id));$('sharedUserSave').textContent=busy?'正在创建独立用户…':`导入所选 ${[...selected].filter(id=>!done.has(id)).length} 份订阅`;$('sharedProfilesAll').disabled=$('sharedProfilesClear').disabled=busy;};
+  search.oninput=update;search.onkeydown=event=>{if(event.key==='Enter')event.preventDefault();};form.querySelectorAll('.sharedProfileChoice').forEach(input=>input.onchange=()=>{input.checked?selected.add(input.value):selected.delete(input.value);update();});
+  $('sharedProfilesAll').onclick=()=>{profiles.filter(visible).filter(p=>!done.has(p.id)).forEach(p=>selected.add(p.id));update();};$('sharedProfilesClear').onclick=()=>{selected.clear();update();};update();
   $('sharedUserForm').onsubmit = async e => {
-    e.preventDefault(); const button = $('sharedUserSave'); button.disabled = true;
+    e.preventDefault();if(busy)return;const targets=profiles.filter(p=>selected.has(p.id)&&!done.has(p.id));if(!targets.length)return;busy=true;update();$('sharedUserError').textContent='';
     try {
-      if (S.profile !== profile) throw Error('订阅已切换，请重新打开窗口');
-      const options = jsonOpt('POST', {serverId, inboundId:id}); options.headers['X-Profile'] = profile;
-      const result = await api('/servers/users', options);
-      closeModal(); S.remoteLoaded = false;
-      if (S.profile === profile) { await reload(false); if (S.page === 'serverNodes') await serverNodes(true); }
-      notice('独立用户已绑定，流量与有效期请在订阅中设置'+(result.runtimeRepaired ? '；已补同步运行内核' : result.runtimeVerified === null ? '；此内核不支持运行用户核验，请测试连接' : ''));
+      for(const target of targets){if(!form.isConnected)break;$('sharedUserProgress').textContent=`正在处理 ${target.name} · ${done.size} 份已完成`;
+        const options=jsonOpt('POST',{serverId,inboundIds:[id]});options.headers['X-Profile']=target.id;
+        try{const response=await api('/servers/users/batch',options),result=response.results?.find(item=>item.inboundId===id);if(!result?.ok)throw Error(result?.error||'结果未确认，请重试核对');done.add(target.id);results.push({id:target.id,name:target.name,ok:true,warning:result.warning||''});}
+        catch(error){results.push({id:target.id,name:target.name,ok:false,error:error.message});}
+        if(!form.isConnected)break;$('sharedUserResults').innerHTML=results.map(item=>`<p class="${item.ok?'hint':'error'}">${esc(item.name)}：${item.ok?'已保存独立用户'+(item.warning?' · '+esc(item.warning):''):esc(item.error)}</p>`).join('');
+      }
+      S.remoteLoaded=false;if(form.isConnected){const failed=results.filter(r=>!r.ok&&!done.has(r.id)).length;$('sharedUserProgress').textContent=`已保存 ${done.size} 份订阅${failed?'，失败项可直接重试':''}。`;}
+      await reload(false);
     } catch (error) { if ($('sharedUserError')) $('sharedUserError').textContent = error.message; }
-    finally { if (button.isConnected) button.disabled = false; }
+    finally {busy=false;update();}
   };
 }
 

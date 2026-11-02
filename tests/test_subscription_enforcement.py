@@ -32,6 +32,10 @@ class EnforcementTests(unittest.TestCase):
         self.addCleanup(setattr, server.CTX, 'profile', previous)
         server.load_profiles()
         self.manager = Mock()
+        from cryptography.fernet import Fernet
+        cipher = Fernet(Fernet.generate_key())
+        self.manager.seal.side_effect = lambda value: cipher.encrypt(str(value).encode()).decode()
+        self.manager.secret.side_effect = lambda record, key: cipher.decrypt(record[key].encode()).decode()
         self.manager.inbounds.return_value = {'inbounds': [{'id': 1, 'port': 4443, 'up': 0, 'down': 0}]}
         self.manager.delete_inbound.return_value = {'deleted': True}
         self.patcher = patch('server.remote_manager', return_value=self.manager)

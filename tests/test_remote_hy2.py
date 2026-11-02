@@ -7,6 +7,12 @@ import server
 
 
 class RemoteHY2Tests(unittest.TestCase):
+    def test_v2rayn_share_preserves_common_servername_and_standard_path(self):
+        from urllib.parse import urlsplit,parse_qs
+        node={'name':'HY2','type':'hysteria2','server':'2001:db8::1','port':24443,'password':':@ p+secret','servername':'tls.example.com'}
+        uri=server.node_to_uri(node);parsed=urlsplit(uri)
+        self.assertEqual(parsed.path,'/');self.assertEqual(parse_qs(parsed.query)['sni'],['tls.example.com'])
+        self.assertEqual(server.parse_node_link(uri)['password'],node['password'])
     def test_create_export_import_across_server_types(self):
         for kind in ('sing-box', 'xray', 'panel'):
             with self.subTest(kind=kind):

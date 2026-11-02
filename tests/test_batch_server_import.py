@@ -13,6 +13,10 @@ class BatchServerImportTests(unittest.TestCase):
     setUp = fixture.EnforcementTests.setUp
 
     def setup_rows(self):
+        from cryptography.fernet import Fernet
+        cipher=Fernet(Fernet.generate_key())
+        self.manager.seal.side_effect=lambda value:cipher.encrypt(str(value).encode()).decode()
+        self.manager.secret.side_effect=lambda record,key:cipher.decrypt(record[key].encode()).decode()
         self.rows = [{ 'id':i, 'port':24000+i, 'protocol':'vless', 'enable':True,
                        'remark':f'入口-{i}', 'tag':f'inbound-{i}', 'streamSettings':{},
                        'settings':{'clients':[]}, 'clientStats':[], 'up':999999, 'down':999999}
@@ -155,6 +159,23 @@ class BatchServerImportTests(unittest.TestCase):
         self.batch();second=[n['uuid'] for n in server.read_config()['proxies']]
         self.assertFalse(set(first)&set(second))
         self.assertEqual([len(r['settings']['clients']) for r in self.rows],[2,2,0])
+
+    def test_failure_before_apply_recovers_same_encrypted_identity_after_sweep(self):
+        self.setup_rows();mutate=self.manager.subscription_user.side_effect
+        def fail(*args,**kwargs):raise ValueError('offline before apply')
+        self.manager.subscription_user.side_effect=fail
+        self.assertEqual(self.batch((1,))['failed'],1)
+        binding=server.profile_record()['remoteNodes'][0]
+        client=__import__('json').loads(self.manager.secret(binding,'pendingClient'))
+        self.assertNotIn(client['id'],server.PROFILES_FILE.read_text())
+        self.assertNotIn('pendingClient',server.public_binding_records(server.profile_record())[0])
+        server.enforce_profile('clash');self.assertEqual(binding['status'],'provisioning')
+        with self.assertRaises(ValueError):server.create_profile({'name':'copy','templateId':'clash'})
+        server.PROFILES_CACHE=None
+        self.manager.subscription_user.side_effect=mutate
+        self.assertEqual(self.batch((1,))['succeeded'],1)
+        self.assertEqual(self.rows[0]['settings']['clients'][0]['id'],client['id'])
+        self.assertEqual(len(self.rows[0]['settings']['clients']),1)
 
 import test_end_to_end as http_fixture
 from unittest.mock import Mock
