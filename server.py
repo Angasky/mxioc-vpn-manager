@@ -1277,8 +1277,9 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
             try:
                 manager.subscription_user(server_id, binding, 'add', client)
             except Exception as exc:
-                detail = str(exc)
-                binding['error'] = detail if detail.startswith(('X-Panel ', '无法连接 X-Panel ')) else '用户创建结果待核对，请重试添加；总控已保留身份记录'
+                from remote_manager import clean_log
+                detail = clean_log(str(exc), [client.get(k) for k in ('id', 'password', 'auth', 'subId')])[:350]
+                binding['error'] = '用户创建结果待核对；总控已保留身份记录。原因：' + (detail or type(exc).__name__)
                 save_profiles(load_profiles())
                 raise ValueError(binding['error']) from None
             with LOCK:
@@ -1289,9 +1290,10 @@ def _provision_user_at_inbound(record, manager, server_id, row, client):
         links = runtime_result['shareLinks']
         result = import_owned_user_links(record, binding, links)
     except Exception as exc:
-        detail = str(exc)
+        from remote_manager import clean_log
+        detail = clean_log(str(exc), [client.get(k) for k in ('id', 'password', 'auth', 'subId')] if client else ())[:350]
         message = '独立用户绑定已保留，但订阅导入未完成；请在同一入站重试添加，不要重新创建入站'
-        if detail.startswith(('X-Panel ', '无法连接 X-Panel ')):
+        if detail:
             message += '：' + detail
         raise ValueError(message) from None
     ENFORCEMENT_WAKE.set()

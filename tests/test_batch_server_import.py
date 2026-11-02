@@ -92,6 +92,17 @@ class BatchServerImportTests(unittest.TestCase):
         self.manager.inbounds.assert_not_called();self.manager.subscription_user.assert_not_called()
         self.assertFalse(server.profile_record().get('traffic'))
 
+    def test_remote_error_is_visible_without_exposing_generated_credentials(self):
+        self.setup_rows()
+        def fail(sid,binding,operation,client=None):
+            raise ValueError('3x-ui：empty client ID; rejected ' + client['id'])
+        self.manager.subscription_user.side_effect=fail
+        result=self.batch((1,))
+        error=result['results'][0]['error']
+        self.assertIn('empty client ID',error)
+        self.assertIn('[已隐藏]',error)
+        self.assertEqual(server.profile_record()['remoteNodes'][0]['error'],error)
+
     def test_expired_exhausted_and_limited_plan_rejected_before_remote_calls(self):
         self.setup_rows();record=server.profile_record()
         for changes in ({'expire':1},{'total':100,'upload':100},{'speedMbps':1}):
