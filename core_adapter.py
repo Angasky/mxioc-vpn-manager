@@ -227,6 +227,8 @@ class CoreAPI:
                 item['settings'] = json_object(row['settings'])
                 if 'clients' in item['settings']:
                     item['settings']['clients'] = [c for c in item['settings']['clients'] if c.get('enable') is not False]
+                if item['protocol'] == 'hysteria':
+                    item['settings']['users'] = [client for client in item['settings'].pop('clients', []) if client.get('enable') is not False]
                 item['streamSettings'] = json_object(row.get('streamSettings', {}))
                 item['sniffing'] = json_object(row.get('sniffing', {}))
                 native['inbounds'].append(item)

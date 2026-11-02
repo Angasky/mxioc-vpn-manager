@@ -5,7 +5,7 @@ import json
 import secrets
 import uuid
 
-PROTOCOLS = {'vless', 'vmess', 'trojan', 'hysteria2', 'tuic'}
+PROTOCOLS = {'vless', 'vmess', 'trojan', 'hysteria', 'hysteria2', 'tuic'}
 
 
 def settings(row):
@@ -30,6 +30,8 @@ def endpoint_identity(row):
 
 
 def user_identity(client):
+    if client.get('auth'):
+        return digest({k: client.get(k) for k in ('id', 'password', 'email', 'flow', 'auth')})
     return digest({k: client.get(k) for k in ('id', 'password', 'email', 'flow')})
 
 
@@ -41,7 +43,7 @@ def find_user(row, binding, missing_ok=False):
         return None
     if len(matches) != 1 or user_identity(matches[0]) != binding['userHash']:
         raise ValueError('远端用户身份已变化或缺失，停止用户操作')
-    field = 'password' if row.get('protocol') in ('trojan', 'hysteria2') else 'id'
+    field = 'auth' if row.get('protocol') in ('hysteria', 'hysteria2') and matches[0].get('auth') else 'password' if row.get('protocol') in ('trojan', 'hysteria2') else 'id'
     credential = matches[0].get(field)
     if not credential or sum(c.get(field) == credential for c in settings(row).get('clients', [])) != 1:
         raise ValueError('用户认证凭据被共用，停止操作以免影响其他用户')
@@ -64,6 +66,10 @@ def new_user(row):
         user['id'] = str(uuid.uuid4())
     if protocol in ('trojan', 'hysteria2', 'tuic'):
         user['password'] = secrets.token_urlsafe(24)
+    if protocol == 'hysteria':
+        if int(settings(row).get('version', 2)) != 2:
+            raise ValueError('仅支持 Hysteria2 入站')
+        user['auth'] = secrets.token_urlsafe(24)
     if protocol == 'vless':
         stream = row.get('streamSettings') or {}
         stream = json.loads(stream) if isinstance(stream, str) else stream

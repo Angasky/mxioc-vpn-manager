@@ -2498,8 +2498,10 @@ function remoteNodeForm(relay) {
     ${relay ? '' : '<div id="rnTlsFields" class="span2 hidden"><div class="grid"><div><label for="rnCert">远端证书绝对路径</label><input id="rnCert" placeholder="/etc/ssl/certs/server.pem"></div><div><label for="rnKey">远端私钥绝对路径</label><input id="rnKey" placeholder="/etc/ssl/private/server.key"></div><div><label for="rnPath">WebSocket 路径</label><input id="rnPath" value="/vpn"></div></div><p class="hint">总控不回传证书私钥；证书必须已存在于远端并允许内核服务账号读取。</p></div>'}
     ${relay ? '<div class="span2"><label for="rnLanding">落地节点分享链接</label><textarea id="rnLanding" required placeholder="vless://、vmess://、trojan://、ss://、socks5:// 或 http://"></textarea><div class="note">将创建 Reality 入口、落地出站和最高优先级路由。失败时尝试撤回本次创建，并保留配置备份。</div></div>' : ''}
   </div><label class="inlinecheck"><input id="rnImport" type="checkbox" checked disabled>创建后添加到当前订阅</label><div id="remoteError" class="error" role="alert"></div><button id="rnSave" class="btn primary">创建${relay ? '中转' : '节点'}</button></form>`);
-  if ($('rnTemplate') && S.remoteServer?.installType === 'sing-box') {
+  if ($('rnTemplate')) {
     $('rnTemplate').add(new Option('Hysteria2 + TLS（需远端证书）', 'hysteria2'));
+  }
+  if ($('rnTemplate') && S.remoteServer?.installType === 'sing-box') {
     $('rnTemplate').add(new Option('TUIC + TLS（需远端证书）', 'tuic'));
   }
   if ($('rnTemplate')) {

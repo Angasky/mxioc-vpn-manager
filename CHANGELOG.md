@@ -1,5 +1,12 @@
 # 更新日志
 
+## 2026-11-02：服务器 HY2 创建与订阅导入
+
+- 面板服务器和独立 Xray 增加 Hysteria2 + TLS 模板，保留 sing-box 原有支持；面板使用 hysteria / version=2 / clients.auth，Xray 原生转换为 users，避免密码字段与内核不匹配。
+- 导入识别面板 hysteria、hy2 和 hysteria2，优先保留 auth，转换为订阅标准 hysteria2；不再将内核 hysteria 传输字段误写为客户端 network。
+- 创建需要证书域名及远端证书/私钥路径，使用随机高端口；不自动升级远端面板或内核。独立内核继续先校验配置再应用，不把 Hysteria1 当作 HY2。
+- 增加面板 / Xray / sing-box 模板与分享链接密码往返测试，以及各服务器类型的创建入口回归。
+
 ## 2026-10-30：节点策略组快捷编辑与操作分层
 
 - 节点管理增加显眼的“导入链接”入口，明确支持现有 Snell 完整 Base64 认证链接、PSK 链接与批量导入。

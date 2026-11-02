@@ -1323,7 +1323,7 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                 if user_identity(client) != binding['userHash']:
                     raise ValueError('待创建用户身份不匹配')
                 if current is None:
-                    field = 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
+                    field = 'auth' if row['protocol'] == 'hysteria' or row['protocol'] == 'hysteria2' and client.get('auth') else 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
                     if not client.get(field) or any(c.get(field) == client[field] for c in model.get('clients', [])):
                         raise ValueError('认证凭据重复，未添加用户')
                     model.setdefault('clients', []).append(copy.deepcopy(client))
@@ -1342,7 +1342,9 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                     # runtime API where available; never rewrite other users.
                     payload = {'id': row['id'], 'protocol': row['protocol'],
                                'settings': json.dumps({'clients': [client if operation == 'add' else current]})}
-                    identity = quote(str((current or client).get('password' if row['protocol'] in ('trojan', 'hysteria2') else 'id', '')), safe='')
+                    account = current or client
+                    field = 'auth' if row['protocol'] == 'hysteria' or row['protocol'] == 'hysteria2' and account.get('auth') else 'password' if row['protocol'] in ('trojan', 'hysteria2') else 'id'
+                    identity = quote(str(account.get(field, '')), safe='')
                     if operation == 'add' and current is None:
                         api.request('panel/api/inbounds/addClient', payload)
                     elif operation == 'remove':
@@ -1515,7 +1517,7 @@ def prepare_inbound(payload):
         raise ValueError("入站配置必须是 JSON 对象")
     result = {key: value for key, value in payload.items() if key in INBOUND_FIELDS}
     result["port"] = valid_port(result.get("port"))
-    if result.get("protocol") not in {"vless", "vmess", "trojan", "shadowsocks", "socks", "http", "dokodemo-door", "mixed", "tunnel", "hysteria2", "tuic"}:
+    if result.get("protocol") not in {"vless", "vmess", "trojan", "shadowsocks", "socks", "http", "dokodemo-door", "mixed", "tunnel", "hysteria", "hysteria2", "tuic"}:
         raise ValueError("不支持该 Xray 入站协议")
     for key in ("settings", "streamSettings", "sniffing"):
         if key in result:
@@ -1559,8 +1561,8 @@ def build_inbound(api, payload):
         key = text(payload.get("keyFile"), "远端私钥文件路径", maximum=512)
         if any(not p.startswith("/") or ".." in Path(p).parts for p in (cert, key)):
             raise ValueError("证书和私钥必须填写远端绝对路径")
-        if template in ("hysteria2", "tuic") and getattr(api, "kind", "") != "sing-box":
-            raise ValueError("Hysteria2 / TUIC 模板仅支持独立 sing-box 内核")
+        if template == "tuic" and getattr(api, "kind", "") != "sing-box":
+            raise ValueError("TUIC 模板仅支持独立 sing-box 内核")
         if template in ("trojan-tls", "hysteria2", "tuic"):
             client["password"] = secrets.token_urlsafe(24)
             protocol, settings = ("trojan" if template == "trojan-tls" else template), {"clients": [client]}
@@ -1568,6 +1570,11 @@ def build_inbound(api, payload):
             protocol, settings = "vless", {"clients": [client], "decryption": "none"}
             stream.update(network="ws", wsSettings={"path": text(payload.get("path", "/"), "WebSocket 路径", maximum=256)})
         stream.update(security="tls", tlsSettings={"serverName": sni, "alpn": ["h3"] if template in ("hysteria2", "tuic") else ["h2", "http/1.1"], "certificates": [{"certificateFile": cert, "keyFile": key}]})
+        if template == "hysteria2" and getattr(api, "kind", "") != "sing-box":
+            protocol = "hysteria"
+            client["auth"] = client.pop("password")
+            settings["version"] = 2
+            stream.update(network="hysteria", hysteriaSettings={"version": 2})
     elif template == "vmess-tcp":
         protocol, settings = "vmess", {"clients": [client], "disableInsecureEncryption": False}
     elif template == "shadowsocks":
@@ -1584,6 +1591,12 @@ def inbound_nodes(inbound, record):
     settings = json_object(inbound.get("settings", {}))
     stream = json_object(inbound.get("streamSettings", {}))
     protocol = inbound.get("protocol")
+    if protocol in ("hysteria", "hy2"):
+        if int(settings.get("version", 2)) != 2:
+            return []
+        protocol = "hysteria2"
+    if protocol == "hysteria2":
+        settings["clients"] = settings.get("clients", settings.get("users", []))
     base = {"name": inbound.get("remark") or "3x-ui 节点", "server": node_address(record), "port": inbound["port"]}
     if protocol in ("socks", "http"):
         accounts = settings.get("accounts", []) or [{}]
@@ -1600,6 +1613,11 @@ def inbound_nodes(inbound, record):
             continue
         node = {**base, "type": protocol, "name": base["name"] + (" / " + str(client.get("email", "")) if len(settings["clients"]) > 1 else "")}
         node["password" if protocol in ("trojan", "hysteria2") else "uuid"] = client.get("password" if protocol in ("trojan", "hysteria2") else "id", "")
+        if protocol == "hysteria2":
+            node["password"] = client.get("auth") or client.get("password") or ""
+            if not node["password"]:
+                raise ValueError("HY2 用户缺少认证密码，请检查面板 auth 字段")
+            node["udp"] = True
         if protocol == "tuic":
             node["password"] = client.get("password", "")
         if protocol == "vmess":
@@ -1609,7 +1627,7 @@ def inbound_nodes(inbound, record):
         network = stream.get("network", "tcp")
         if network == "raw":
             network = "tcp"  # Xray RAW is TCP; Mihomo does not use the RAW alias.
-        if network != "tcp":
+        if network != "tcp" and protocol != "hysteria2":
             node["network"] = network
         if network == "ws":
             node["ws-opts"] = {"path": stream.get("wsSettings", {}).get("path", "/"), "headers": stream.get("wsSettings", {}).get("headers", {})}

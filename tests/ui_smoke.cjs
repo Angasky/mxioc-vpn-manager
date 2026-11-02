@@ -57,6 +57,9 @@ t.setApi(async(path,opt)=>{requests.push([path,opt]);if(path==='/servers')return
  await t.failoverModal();$('foName').value='HA';$('foExit').value='exit';const entries=w.document.querySelectorAll('.foEntry');entries[0].value='entry';entries[1].value='backup';
  const foButton=$('failoverForm').querySelector('button.primary');await $('failoverForm').onsubmit({preventDefault(){},submitter:foButton});
  const fo=JSON.parse(requests.find(r=>r[0]==='/failovers' && r[1]?.method==='POST')[1].body);assert.deepEqual(fo.entries,['entry','backup']);assert.equal(fo.exit,'exit');assert.equal(fo.interval,30);assert(!foButton.disabled);
+ for(const installType of ['x-ui','3x-ui','xray','sing-box']){
+  t.S.remoteServer={installType};t.remoteNodeForm(false);assert([...$('rnTemplate').options].some(o=>o.value==='hysteria2'),installType+' HY2 template');
+ }
  t.S.remoteServer={installType:'sing-box'};t.S.serverId='native';t.remoteNodeForm(false);assert([...$('rnTemplate').options].some(o=>o.value==='hysteria2'));
  assert(Number($('rnPort').value)>20000 && Number($('rnPort').value)<=65535);
  $('rnTemplate').value='tuic';$('rnTemplate').onchange();assert(!$('rnTlsFields').classList.contains('hidden'));
