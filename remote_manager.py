@@ -534,7 +534,7 @@ class RemoteManager:
 
     def public(self, record):
         keys = ("id", "name", "host", "sshPort", "sshUser", "fingerprint", "domain", "nodeAddress", "panelUser",
-                "panelAddress", "panelUrl", "panelPort", "panelPath", "panelTLS", "createdAt", "lastError", "connectionMode", "existingVerifiedAt")
+                "panelAddress", "panelUrl", "panelPort", "panelPath", "panelTLS", "createdAt", "lastError", "connectionMode", "existingVerifiedAt", "certificateDomains")
         result = {key: record.get(key) for key in keys}
         result["installType"] = install_type(record)
         result["hasCoreConfig"] = bool(record.get("coreConfig"))
@@ -1310,7 +1310,19 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
 
     def create_inbound(self, server_id, payload):
         def action(api, record):
-            body = prepare_inbound(payload["inbound"]) if "inbound" in payload else build_inbound(api, self.verified_template_payload(record, payload))
+            prepared = payload
+            if 'inbound' not in payload and payload.get('certificateMode') == 'auto':
+                from certificate_manager import prepare_certificate, TLS_TEMPLATES
+                if payload.get('template') not in TLS_TEMPLATES:
+                    raise ValueError('当前模板不使用 TLS 证书')
+                if payload.get('certificateJobId'):
+                    job = self.certificate_job(server_id, job_id=payload['certificateJobId'])
+                    if job['status'] != 'succeeded' or job['domain'] != valid_domain(payload.get('serverName')):
+                        raise ValueError('证书尚未就绪或域名已变化，请重新准备证书')
+                    prepared = {**payload, 'certFile': job['certFile'], 'keyFile': job['keyFile']}
+                else:
+                    prepared = prepare_certificate(self, api, record, payload)
+            body = prepare_inbound(prepared["inbound"]) if "inbound" in prepared else build_inbound(api, self.verified_template_payload(record, prepared))
             created = api.request("panel/api/inbounds/add", body)
             if not isinstance(created, dict) or not created.get("id"):
                 raise ValueError("3x-ui 返回的新增入站结果缺少 ID，请刷新列表核对，勿重复提交")
@@ -1322,6 +1334,49 @@ print(json.dumps(sorted(rows, key=lambda x: x.get('latencyMs', 1e9))))
                 pass
             return result
         return self.with_panel(server_id, action)
+
+    def certificate_job(self, server_id, payload=None, job_id=None):
+        from certificate_manager import prepare_certificate
+        with self.lock:
+            record = self.record(server_id)
+            revision = hashlib.sha256(json.dumps([record.get(k) for k in ('host', 'sshPort', 'fingerprint', 'installType')]).encode()).hexdigest()
+            jobs = self.__dict__.setdefault('certificate_jobs', {})
+            if job_id:
+                job = jobs.get(job_id)
+                if not job or job['serverId'] != server_id:
+                    raise ValueError('证书任务不存在或服务已重启，请重新准备证书；尚未创建节点')
+                if job['serverRevision'] != revision:
+                    raise ValueError('服务器连接信息已变化，请重新准备证书')
+                return copy.deepcopy(job)
+            domain = valid_domain((payload or {}).get('serverName'))
+            if not domain:
+                raise ValueError('请填写自己的证书域名')
+            for job in jobs.values():
+                if job['serverId'] == server_id and job['status'] in ('queued', 'running'):
+                    if job['domain'] == domain:
+                        return copy.deepcopy(job)
+                    raise ValueError('此服务器正在准备另一张证书，请稍后重试')
+            if len(jobs) >= 64:
+                finished = next((key for key, value in jobs.items() if value['status'] in ('succeeded', 'failed')), None)
+                if finished is None:
+                    raise ValueError('证书任务过多，请稍后重试')
+                del jobs[finished]
+            identity = secrets.token_hex(12)
+            job = {'id': identity, 'serverId': server_id, 'serverRevision': revision, 'domain': domain, 'status': 'queued', 'error': ''}
+            jobs[identity] = job
+        def worker():
+            try:
+                with self.lock: job['status'] = 'running'
+                prepared = self.with_panel(server_id, lambda api, record: prepare_certificate(self, api, record, {'serverName': domain}))
+                with self.lock:
+                    record = self.record(server_id)
+                    record['certificateDomains'] = list(dict.fromkeys(record.get('certificateDomains', []) + [domain]))[-32:]
+                    self.flush()
+                    job.update(status='succeeded', certFile=prepared['certFile'], keyFile=prepared['keyFile'])
+            except Exception as exc:
+                with self.lock: job.update(status='failed', error=str(exc)[:2000])
+        threading.Thread(target=worker, daemon=True, name='certificate-'+identity).start()
+        return copy.deepcopy(job)
 
     def preflight_user_support(self, server_id):
         with self.lock:

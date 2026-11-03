@@ -2513,9 +2513,35 @@ function renderRemoteNodes() {
     <div class="toolbar"><input id="search" aria-label="搜索远端节点" placeholder="搜索节点名称、协议、端口…" value="${esc(q)}"></div>
     <div class="tablewrap"><table><thead><tr><th>ID</th><th>名称</th><th>协议 / 端口</th><th>状态</th><th>上传 / 下载</th><th>订阅联动</th><th>操作</th></tr></thead><tbody>
     ${page.rows.map(x => `<tr><td>${x.id}</td><td>${esc(x.remark)}</td><td><code>${esc(x.protocol)} : ${x.port}</code></td><td>${x.enable ? '启用' : '停用'}</td><td>${formatBytes(x.up || 0)} / ${formatBytes(x.down || 0)}</td><td>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? '<span class="pill">已绑定当前订阅</span>' : '<span class="muted">未绑定当前订阅</span>'}</td><td>
-      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>添加订阅用户</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">暂无匹配的远端入站</td></tr>'}
+      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>添加订阅用户</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">暂无匹配的远端入站</td></tr>'}
     </tbody></table></div>${pagination(page)}</section>`;
   bindSearch('remoteNodes', renderRemoteNodes);
+}
+
+function remoteTlsDomains() {
+  const values=[...(S.remoteServer?.certificateDomains || []),S.remoteServer?.domain];
+  for(const row of S.remoteRows || []) {
+    try {const stream=typeof row.streamSettings==='string' ? JSON.parse(row.streamSettings) : row.streamSettings || {};if(stream.security==='tls')values.push(stream.tlsSettings?.serverName);}catch(_){}
+  }
+  return [...new Set(values.filter(value=>typeof value==='string' && value.includes('.') && !/[\s/:]/.test(value)))];
+}
+
+async function prepareNodeCertificate(serverId,domain,form) {
+  const active=()=>form.isConnected && !$('modal').classList.contains('hidden') && $('remoteNodeForm')===form;
+  let result=await api('/servers/certificates',jsonOpt('POST',{serverId,serverName:domain}));
+  const deadline=Date.now()+360000;
+  while(active()) {
+    const job=result.job;
+    if(job?.status==='succeeded')return job;
+    if(job?.status==='failed')throw Error(job.error || '证书申请失败，尚未创建节点');
+    if(!job?.id || Date.now()>deadline)throw Error('证书准备尚未确认，请重试准备；尚未创建节点');
+    $('rnSave').textContent='正在准备证书…';
+    $('remoteError').textContent='正在检查域名并申请证书，通常需要几十秒。关闭窗口会取消后续节点创建。';
+    await new Promise(resolve=>setTimeout(resolve,1500));
+    if(!active())return null;
+    result=await api('/servers/certificates?id='+encodeURIComponent(serverId)+'&job='+encodeURIComponent(job.id));
+  }
+  return null;
 }
 
 function remoteNodeForm(relay) {
@@ -2523,35 +2549,55 @@ function remoteNodeForm(relay) {
   openModal(relay ? '添加服务器中转' : '添加服务器节点', `<form id="remoteNodeForm"><div class="grid">
     <div><label for="rnName">节点名称</label><input id="rnName" required maxlength="100" placeholder="例如 香港中转"></div>
     <div><label for="rnPort">监听端口</label><input id="rnPort" type="number" min="1" max="65535" required value="${randomPort}"><p class="hint">默认随机使用 20001–65535，可手动修改；创建时检查冲突。</p></div>
-    ${relay ? '' : '<div class="span2"><label for="rnTemplate">节点模板</label><select id="rnTemplate"><option value="vless-reality">VLESS + Reality / Vision（免证书）</option><option value="vmess-tcp">VMess + TCP</option><option value="trojan-tls">Trojan + TLS（需远端证书）</option><option value="vless-ws-tls">VLESS + WebSocket + TLS（需远端证书）</option></select><p class="hint">模板按所选服务器内核提供。同一入站可供多个订阅使用；每个订阅拥有独立用户、用量和有效期。共用入站暂不支持单用户带宽限制。</p></div>'}
-    <div class="span2" id="rnSniFields"><label for="rnSni">Reality / TLS 域名</label><div class="sni-field"><input id="rnSni" value="raw.githubusercontent.com" required><button id="rnSniTest" type="button" class="btn">${uiIcon('gauge')}扫描并选择 SNI</button></div><p class="hint">Reality 可扫描选择；证书模板必须使用与远端证书匹配的域名。</p></div>
-    ${relay ? '' : '<div id="rnTlsFields" class="span2 hidden"><div class="grid"><div><label for="rnCert">远端证书绝对路径</label><input id="rnCert" placeholder="/etc/ssl/certs/server.pem"></div><div><label for="rnKey">远端私钥绝对路径</label><input id="rnKey" placeholder="/etc/ssl/private/server.key"></div><div><label for="rnPath">WebSocket 路径</label><input id="rnPath" value="/vpn"></div></div><p class="hint">总控不回传证书私钥；证书必须已存在于远端并允许内核服务账号读取。</p></div>'}
+    ${relay ? '' : '<div class="span2"><label for="rnTemplate">节点模板</label><select id="rnTemplate"><option value="vless-reality">VLESS + Reality / Vision（免证书）</option><option value="vmess-tcp">VMess + TCP</option><option value="trojan-tls">Trojan + TLS（自动证书）</option><option value="vless-ws-tls">VLESS + WebSocket + TLS（自动证书）</option></select><p class="hint">模板按所选服务器内核提供。同一入站可供多个订阅使用；每个订阅拥有独立用户、用量和有效期。共用入站暂不支持单用户带宽限制。</p></div>'}
+    <div class="span2" id="rnSniFields"><label id="rnSniLabel" for="rnSni">Reality 伪装域名</label><div class="sni-field"><input id="rnSni" value="raw.githubusercontent.com" required><datalist id="rnTlsDomains">${remoteTlsDomains().map(domain=>`<option value="${esc(domain)}"></option>`).join('')}</datalist><button id="rnSniTest" type="button" class="btn">${uiIcon('gauge')}扫描并选择 SNI</button></div><p class="hint" id="rnSniHint">Reality 可扫描并选择内置候选域名。</p></div>
+    ${relay ? '' : '<div id="rnTlsFields" class="span2 hidden"><label for="rnCertMode">证书方式</label><select id="rnCertMode"><option value="auto">自动申请并续期（推荐）</option><option value="manual">使用已有证书（高级）</option></select><p class="hint" id="rnAutoCertHint">填写你自己的域名，A/AAAA 解析到这台服务器并关闭 CDN 代理。自动通过 TCP 80 验证，请确保端口开放且未占用；不会停止已有网站。续期后会自动刷新对应节点服务。</p><div class="grid hidden" id="rnManualCertFields"><div><label for="rnCert">远端证书绝对路径</label><input id="rnCert" placeholder="/etc/ssl/certs/server.pem"></div><div><label for="rnKey">远端私钥绝对路径</label><input id="rnKey" placeholder="/etc/ssl/private/server.key"></div></div><div id="rnWsField"><label for="rnPath">WebSocket 路径</label><input id="rnPath" value="/vpn"></div><p class="hint">自动签发失败时显示原因，不会创建不可用节点。私钥始终留在节点服务器。</p></div>'}
     ${relay ? '<div class="span2"><label for="rnLanding">落地节点分享链接</label><textarea id="rnLanding" required placeholder="vless://、vmess://、trojan://、ss://、socks5:// 或 http://"></textarea><div class="note">将创建 Reality 入口、落地出站和最高优先级路由。失败时尝试撤回本次创建，并保留配置备份。</div></div>' : ''}
   </div><label class="inlinecheck"><input id="rnImport" type="checkbox" checked disabled>创建后添加到当前订阅</label><div id="remoteError" class="error" role="alert"></div><button id="rnSave" class="btn primary">创建${relay ? '中转' : '节点'}</button></form>`);
   if ($('rnTemplate')) {
-    $('rnTemplate').add(new Option('Hysteria2 + TLS（需远端证书）', 'hysteria2'));
+    $('rnTemplate').add(new Option('Hysteria2 + TLS（自动证书）', 'hysteria2'));
   }
   if ($('rnTemplate') && S.remoteServer?.installType === 'sing-box') {
-    $('rnTemplate').add(new Option('TUIC + TLS（需远端证书）', 'tuic'));
+    $('rnTemplate').add(new Option('TUIC + TLS（自动证书）', 'tuic'));
   }
+  let realityDomain='raw.githubusercontent.com',tlsDomain=remoteTlsDomains()[0] || '',wasTls=false;
+  if ($('rnCertMode')) $('rnCertMode').onchange=()=>{const manual=val('rnCertMode')==='manual';$('rnManualCertFields').classList.toggle('hidden',!manual);$('rnAutoCertHint').classList.toggle('hidden',manual);$('rnCert').required=$('rnKey').required=manual;};
   if ($('rnTemplate')) {
     $('rnTemplate').onchange = () => {
       const tls = ['trojan-tls','vless-ws-tls','hysteria2','tuic'].includes(val('rnTemplate'));
+      if(tls!==wasTls) {if(wasTls)tlsDomain=val('rnSni');else realityDomain=val('rnSni');$('rnSni').value=tls ? tlsDomain : realityDomain;} wasTls=tls;
+      $('rnSniLabel').textContent=tls ? '证书域名 / SNI（你自己的域名）' : 'Reality 伪装域名';
+      $('rnSni').placeholder=tls ? '例如 hy2.example.com' : '选择或扫描 Reality 域名';
+      if(tls)$('rnSni').setAttribute('list','rnTlsDomains');else $('rnSni').removeAttribute('list');
+      $('rnSniHint').textContent=tls ? '从已使用的证书域名中选择，或输入新的自有域名。GitHub 等第三方域名不能申请到你的服务器证书。' : 'Reality 扫描保留全部内置候选，只有实测通过的域名可选。';
+      $('rnWsField').classList.toggle('hidden',val('rnTemplate')!=='vless-ws-tls');
       $('rnTlsFields').classList.toggle('hidden', !tls);
       $('rnSniFields').classList.toggle('hidden', !tls && val('rnTemplate') !== 'vless-reality');
       $('rnSni').required=tls || val('rnTemplate')==='vless-reality';
-      $('rnSniTest').classList.toggle('hidden',tls);
+      $('rnSniTest').classList.toggle('hidden',tls || val('rnTemplate')!=='vless-reality');
+      $('rnCert').required=$('rnKey').required=tls && val('rnCertMode')==='manual';
     };
     $('rnTemplate').onchange();
   }
   $('rnSniTest').onclick = () => openSniScanner(S.serverId, 'rnSni');
   $('remoteNodeForm').onsubmit = async e => {
-    e.preventDefault(); const serverId = S.serverId, profile = S.profile, autoImport = $('rnImport').checked;
+    e.preventDefault(); const form=e.currentTarget, serverId = S.serverId, profile = S.profile, autoImport = $('rnImport').checked;
     let created = false;
     $('rnSave').disabled = true;
     const payload = {serverId, certFile:$('rnCert')?.value, keyFile:$('rnKey')?.value, path:$('rnPath')?.value, remark:val('rnName'),port:val('rnPort'),serverName:val('rnSni'),sniVerified:$('rnSni')?.dataset.sniVerified === val('rnSni'),sniAddress:$('rnSni')?.dataset.sniVerified === val('rnSni') ? $('rnSni')?.dataset.sniAddress : undefined,template:relay ? 'vless-reality' : val('rnTemplate'),landingLink:relay ? val('rnLanding') : undefined};
     try {
-      const data = await api(relay ? '/servers/relay' : '/servers/users', jsonOpt('POST', payload));
+      if(!relay && ['trojan-tls','vless-ws-tls','hysteria2','tuic'].includes(payload.template) && val('rnCertMode')==='auto') {
+        const job=await prepareNodeCertificate(serverId,payload.serverName,form);
+        if(!job || !form.isConnected || $('modal').classList.contains('hidden'))return;
+        if(S.profile!==profile)throw Error('订阅已切换，证书已准备完成；请返回目标订阅后创建节点');
+        if(val('rnTemplate')!==payload.template || val('rnSni')!==payload.serverName)throw Error('配置已改变，证书已准备完成，请核对后重新点击创建');
+        payload.certificateMode='auto';payload.certificateJobId=job.id;
+        if(S.remoteServer)S.remoteServer.certificateDomains=[...new Set([...(S.remoteServer.certificateDomains || []),job.domain])];
+      }
+      if(!form.isConnected || $('modal').classList.contains('hidden'))return;
+      $('rnSave').textContent='正在创建节点…';$('remoteError').textContent='';
+      const options=jsonOpt('POST',payload);options.headers={...(options.headers || {}),'X-Profile':profile};
+      const data = await api(relay ? '/servers/relay' : '/servers/users',options);
       created = true;
       closeModal(); S.remoteLoaded = false;
       if (S.page === 'serverNodes' && S.serverId === serverId) await serverNodes();
@@ -2559,7 +2605,7 @@ function remoteNodeForm(relay) {
         try { await importRemoteLinks(data.shareLinks, {serverId, inboundId:data.inbound.id}); } catch (error) { return alert('远端节点已创建，但订阅导入失败：'+error.message+'。请从“链接 / 导入”重试导入，不要重复创建。'); }
       }
       notice('远端'+(relay ? '中转' : '节点')+'已创建'+(autoImport && S.profile !== profile ? '；当前订阅已切换，未自动导入' : autoImport && !data.shareLinks?.length ? '；未返回兼容链接，请在远端面板核对后导入' : ''));
-    } catch (error) { if (created) alert('远端节点已创建，但刷新列表失败：'+error.message+'。请刷新确认，勿重复创建。'); else if ($('remoteError')) { $('remoteError').textContent = error.message; $('rnSave').disabled = false; } else alert(error.message); }
+    } catch (error) { if (created) alert('远端节点已创建，但刷新列表失败：'+error.message+'。请刷新确认，勿重复创建。'); else if ($('remoteError')) { $('remoteError').textContent = error.message; $('rnSave').disabled = false; $('rnSave').textContent='重新创建'; } else alert(error.message); }
   };
 }
 

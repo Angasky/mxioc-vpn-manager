@@ -3945,6 +3945,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/servers/metrics":
                 query = parse_qs(urlparse(self.path).query)
                 return self.json_out(host_metrics((query.get("id") or [""])[0]))
+            if path == "/admin/api/servers/certificates":
+                query = parse_qs(urlparse(self.path).query)
+                identity, job_id = (query.get('id') or [''])[0], (query.get('job') or [''])[0]
+                if not job_id:
+                    raise ValueError('缺少证书任务标识')
+                return self.json_out({'job': remote_manager().certificate_job(identity, job_id=job_id)})
             if path in ("/admin/api/servers/jobs", "/admin/api/servers/inbounds"):
                 query = parse_qs(urlparse(self.path).query)
                 identity = (query.get("id") or [""])[0]
@@ -4056,6 +4062,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out(remote_manager().attach_existing(str(data.get("id", ""))))
             if path == "/admin/api/servers/sni":
                 return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates"), force=data.get("force") is True))
+            if path == "/admin/api/servers/certificates":
+                return self.json_out({'job': remote_manager().certificate_job(str(data.get('serverId', '')), data)}, 202)
             if path == "/admin/api/servers/users/batch":
                 self.select_profile()
                 return self.json_out({"ok": True, **batch_subscription_users(data)})
