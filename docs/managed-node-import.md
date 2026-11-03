@@ -12,3 +12,5 @@
 写入失败保留历史和待重试状态；镜像部分写入后，下次会修复镜像，不把主文件已清理误当成全部完成。
 
 接口 `POST /admin/api/servers/users/targets` 接收 `serverId` 和 1–50 个 `inboundIds`，返回每份订阅的 `importedInboundIds`。该接口只读取本地归属和配置，不读取 SSH、不返回订阅 token 或节点密码。真正导入仍经已有独立用户接口逐个核验，并在配置保存后才确认完成。
+
+若旧安装在批量导入时提示 `No module named 'managed_nodes'`，原因是早期安装器漏装了 `managed_nodes.py`，并非服务器节点或订阅数据损坏。更新至修复版后，安装器会补齐该模块并备份已有文件；后台在线更新和命令行更新共用此修复，无需重新创建节点或订阅。
