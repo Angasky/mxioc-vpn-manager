@@ -2277,13 +2277,13 @@ async function chooseNodeServer(action = 'browse') {
     if (!target?.isConnected || S.profile !== profile) return;
     const list = data.servers || [];
     if (!list.length) { target.innerHTML = '<p>尚未添加服务器，请先到服务器管理登记服务器。</p><button class="btn" id="pickerAddServer">前往服务器管理</button>'; $('pickerAddServer').onclick = () => {closeModal();void go('servers');}; return; }
-    target.innerHTML = `<p class="hint">当前订阅：${esc(S.data?.profile?.name || '')}。选择服务器后可创建模板节点，或查看并导入已有入站。独立内核目前仅显示总控创建的入站。</p><label for="pickerServer">服务器</label><select id="pickerServer">${list.map(s=>`<option value="${esc(s.id)}" ${s.job?.status === 'running' ? 'disabled' : ''}>${esc(s.name)} · ${esc(s.host)} · ${esc(s.installType || '3x-ui')}${s.job?.status === 'running' ? '（安装中）' : ''}</option>`).join('')}</select><div id="pickerError" class="error"></div><button class="btn primary" id="pickerOpen">${action === 'create' ? '在此服务器创建节点' : '查看服务器已有节点'}</button>`;
+    target.innerHTML = `<p class="hint">当前订阅：${esc(S.data?.profile?.name || '')}。选择服务器后可创建模板节点，或查看并导入已有入站。独立内核目前仅显示总控创建的入站。</p><label for="pickerServer">服务器</label><select id="pickerServer">${list.map(s=>`<option value="${esc(s.id)}" ${s.job?.status === 'running' ? 'disabled' : ''}>${esc(s.name)} · ${esc(s.host)} · ${esc(s.installType || '3x-ui')}${s.job?.status === 'running' ? '（安装中）' : ''}</option>`).join('')}</select><div id="pickerError" class="error"></div><button class="btn primary" id="pickerOpen">${action === 'create' ? '在此服务器创建节点' : action === 'subscriptions' ? '选择节点并加入多个订阅' : '查看服务器已有节点'}</button>`;
     $('pickerOpen').onclick = async () => {
       const button = $('pickerOpen'), id = val('pickerServer');
       if (!id || S.profile !== profile) return $('pickerError').textContent = '请选择服务器，并确认当前订阅未切换';
       button.disabled = true;
       try {
-        if (action === 'create') {
+        if (action === 'create' || action === 'subscriptions') {
           S.serverId = id; S.remoteServer = list.find(s => s.id === id);
           S.remoteRows = []; S.remoteLoaded = false;
           const remote = await api('/servers/inbounds?id=' + encodeURIComponent(id));
@@ -2491,9 +2491,9 @@ async function batchServerImport() {
 }
 
 function sharedUserPicker() {
-  const choices = (S.remoteRows || []).filter(r => ['vless','vmess','trojan','hysteria2','tuic'].includes(r.protocol));
+  const choices = (S.remoteRows || []).filter(r => ['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(r.protocol));
   openModal('为订阅添加服务器节点', `<p class="hint">复用现有入站，为当前订阅创建独立 UUID / 密码；到期或流量用尽只处理此用户，不删除共用入站。</p>
-    ${choices.length ? `<label for="sharedInbound">已有入站</label><select id="sharedInbound">${choices.map(r=>`<option value="${r.id}">${esc(r.remark || r.protocol)} · ${esc(r.protocol)} : ${r.port}</option>`).join('')}</select><button id="sharedChoose" class="btn primary">复用入站并添加订阅用户</button>` : '<p>暂无支持多用户的入站，请先创建一个。</p>'}
+    ${choices.length ? `<label for="sharedInbound">已有入站</label><select id="sharedInbound">${choices.map(r=>`<option value="${r.id}">${esc(r.remark || r.protocol)} · ${esc(r.protocol)} : ${r.port}</option>`).join('')}</select><button id="sharedChoose" class="btn primary">选择要加入的订阅</button>` : '<p>暂无支持多用户的入站，请先创建一个。</p>'}
     <button id="sharedNew" class="btn">创建新共用入站</button>`);
   if ($('sharedChoose')) $('sharedChoose').onclick = () => remoteNodeLinks(Number(val('sharedInbound')));
   $('sharedNew').onclick = () => remoteNodeForm(false);
@@ -2513,7 +2513,7 @@ function renderRemoteNodes() {
     <div class="toolbar"><input id="search" aria-label="搜索远端节点" placeholder="搜索节点名称、协议、端口…" value="${esc(q)}"></div>
     <div class="tablewrap"><table><thead><tr><th>ID</th><th>名称</th><th>协议 / 端口</th><th>状态</th><th>上传 / 下载</th><th>订阅联动</th><th>操作</th></tr></thead><tbody>
     ${page.rows.map(x => `<tr><td>${x.id}</td><td>${esc(x.remark)}</td><td><code>${esc(x.protocol)} : ${x.port}</code></td><td>${x.enable ? '启用' : '停用'}</td><td>${formatBytes(x.up || 0)} / ${formatBytes(x.down || 0)}</td><td>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? '<span class="pill">已绑定当前订阅</span>' : '<span class="muted">未绑定当前订阅</span>'}</td><td>
-      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>添加订阅用户</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">暂无匹配的远端入站</td></tr>'}
+      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>批量加入订阅</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">暂无匹配的远端入站</td></tr>'}
     </tbody></table></div>${pagination(page)}</section>`;
   bindSearch('remoteNodes', renderRemoteNodes);
 }
@@ -2862,10 +2862,10 @@ async function importRemoteLinks(links, source) {
   await reload(false); notice(`已导入 ${result.added} 个节点到当前订阅`);
 }
 
-function remoteNodeLinks(id) {
-  const row = S.remoteRows.find(x => x.id === id); if (!row) return;
+function remoteNodeLinks(id, sourceRows = S.remoteRows, sourceServerId = S.serverId) {
+  const row = sourceRows.find(x => x.id === id); if (!row) return;
   if (!['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol)) return remoteNodeLegacyLinks(id);
-  const profile = S.profile, serverId = S.serverId, selected = new Set([profile]), done = new Set();
+  const profile = S.profile, serverId = sourceServerId, selected = new Set([profile]), done = new Set();
   const profiles = S.profiles.slice(), results = [];
   openModal('节点批量加入订阅', `<form id="sharedUserForm"><p>${esc(row.remark || row.protocol)} · ${esc(row.port)}</p>
     <p class="hint">为每份订阅建立独立用户：VLESS / VMess 使用独立 UUID，HY2 使用独立认证密码。自动启用独立流量计量和到期撤销，保留已有套餐、用量和有效期；重复添加复用本订阅用户。</p>
@@ -3276,18 +3276,44 @@ async function overview() {
   }
 }
 
+function nodeSubscriptionBinding(node) {
+  if(!['vless','vmess','trojan','hysteria2','tuic'].includes(node?.type))return null;
+  return (S.data?.profile?.traffic?.bindings || []).find(binding=>binding.scope==='user' && binding.status==='active' && binding.importedNames?.includes(node.name)) || null;
+}
+
+async function nodeSubscriptionImport(index) {
+  const node=S.data?.nodes?.find(node=>node.index===index),binding=nodeSubscriptionBinding(node),profile=S.profile;
+  if(!binding)return alert('该节点没有有效的服务器用户绑定，请从“单个节点批量加入订阅”选择服务器入站。');
+  openModal('批量加入订阅','<p id="nodeSubscriptionLoading" class="hint">正在核对来源服务器和节点身份…</p><div id="nodeSubscriptionError" class="error" role="alert"></div>');
+  const target=$('nodeSubscriptionLoading');
+  const active=()=>target.isConnected && !$('modal').classList.contains('hidden') && S.profile===profile;
+  try {
+    const data=await api('/servers/inbounds?id='+encodeURIComponent(binding.serverId));
+    if(!active())return;
+    const row=(data.inbounds || []).find(row=>row.id===binding.inboundId);
+    if(!row || !['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol))throw Error('来源入站已不存在或不支持独立用户，请刷新服务器节点后选择。');
+    const settings=typeof row.settings==='string' ? JSON.parse(row.settings) : row.settings || {};
+    const protocol=row.protocol==='hysteria' ? 'hysteria2' : row.protocol;
+    const users=settings.clients || settings.users || [];
+    const matches=client=>client.enable!==false && (['vless','vmess','tuic'].includes(node.type) ? !!node.config?.uuid && client.id===node.config.uuid && (node.type!=='tuic' || client.password===node.config.password) : !!node.config?.password && (client.auth || client.password)===node.config.password);
+    const expectedAddress=data.server?.nodeAddress || data.server?.domain || data.server?.host;
+    if(row.enable===false || protocol!==node.type || Number(row.port)!==Number(node.port) || !users.some(matches) || (expectedAddress && expectedAddress!==node.server))throw Error('节点参数与来源入站已不一致，请从服务器节点页核对后导入；未复制任何连接。');
+    remoteNodeLinks(row.id,data.inbounds,binding.serverId);
+  }catch(error){if(active())$('nodeSubscriptionError').textContent=error.message;}
+}
+
 function nodes() {
   let q = S.filters.nodes || '';
   if (window.cancelNodeDrag) window.cancelNodeDrag();
   let rows = S.data.nodes.filter(x => (x.name + ' ' + x.type + ' ' + nodeProtocol(x) + ' ' + x.server).toLowerCase().includes(q.toLowerCase()));
   $('content').innerHTML = cards() + `
   <section class="panel">
-    <div class="panel-head"><div><h3>我的节点</h3><p class="hint">导入链接或从服务器创建节点，点击卡片上的“策略组”设置用途。</p></div><button type="button" class="btn primary" onclick="importNodeModal()">${uiIcon('circle-plus')}导入链接</button></div>
+    <div class="panel-head"><div><h3>我的节点</h3><p class="hint">服务器绑定节点可直接“批量加入订阅”，为每份订阅生成独立凭据；点击“策略组”设置用途。</p></div><button type="button" class="btn primary" onclick="importNodeModal()">${uiIcon('circle-plus')}导入链接</button></div>
     <div class="toolbar">
       <input id="search" placeholder="> 搜索节点名称、协议类型、服务器地址..." value="${esc(q)}">
       <button type="button" class="btn small primary" onclick="chooseNodeServer('create')">选择服务器添加订阅节点</button>
       <button type="button" class="btn small primary" onclick="batchServerImport()">从服务器批量导入节点</button>
-      <button type="button" class="btn small" onclick="chooseNodeServer('browse')">查看服务器节点</button>
+      <button type="button" class="btn small primary" onclick="chooseNodeServer('subscriptions')">单个节点批量加入订阅</button><button type="button" class="btn small" onclick="chooseNodeServer('browse')">查看服务器节点</button>
       <button type="button" class="btn small" onclick="go('traffic')">订阅流量与有效期</button>
     </div>
     <details class="node-secondary"><summary>批量操作与名称整理</summary><div class="toolbar">
@@ -3315,6 +3341,7 @@ function nodes() {
               <div class="node-card-actions">
                 <button class="btn small" onclick="nodeModal(${x.index})">编辑</button>
                 <button class="btn small" onclick="nodeGroupsModal(${x.index})">策略组</button>
+                ${nodeSubscriptionBinding(x) ? `<button class="btn small primary" onclick="nodeSubscriptionImport(${x.index})">批量加入订阅</button>` : ''}
                 <button class="btn small primary" onclick="shareNode(${x.index})" title="显示二维码并导出节点链接">分享</button>
                 <details><summary class="btn small" aria-label="更多节点操作">更多</summary><div>
                 <button class="btn small" onclick="moveNode(${x.index},-1)" ${x.index === 0 ? 'disabled' : ''} title="上移" aria-label="上移">${uiIcon('arrow-up-from-line')}</button>
