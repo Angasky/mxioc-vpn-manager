@@ -1457,7 +1457,12 @@ def cleanup_missing_nodes(profile_id, include_revoked=False, only_binding=None):
             CTX.profile = previous
 
 
-def reconcile_server_nodes(server_id, rows):
+def server_binding_snapshot(server_id):
+    with ENFORCEMENT_LOCK, LOCK:
+        return {binding_record_token(r["id"], b) for r in load_profiles()["profiles"] for b in r.get("remoteNodes", []) if b.get("serverId") == server_id}
+
+
+def reconcile_server_nodes(server_id, rows, observed=None):
     if not isinstance(rows, list) or any(not isinstance(r, dict) or type(r.get('id')) is not int or r['id'] <= 0 for r in rows):
         raise ValueError('服务器入站列表不完整，未清理订阅节点')
     live = {r['id'] for r in rows}
@@ -1469,7 +1474,7 @@ def reconcile_server_nodes(server_id, rows):
             affected = []
             for record in load_profiles()['profiles']:
                 for binding in record.get('remoteNodes', []):
-                    if binding.get('serverId') != server_id:
+                    if binding.get('serverId') != server_id or (observed is not None and binding_record_token(record['id'], binding) not in observed):
                         continue
                     if binding.get('inboundId') not in live and binding.get('status') in ('active', 'provisioning'):
                         binding.update(status='missing', error='远端入站已不存在')
@@ -1494,8 +1499,9 @@ def reconcile_profile_inventory(profile_id):
     ok = True
     for server_id in server_ids:
         try:
+            observed = server_binding_snapshot(server_id)
             rows = remote_manager().inbounds(server_id)['inbounds']
-            ok = not reconcile_server_nodes(server_id, rows)['errors'] and ok
+            ok = not reconcile_server_nodes(server_id, rows, observed)['errors'] and ok
         except Exception:
             ok = False  # An offline server is not evidence that any node was deleted.
     return ok
@@ -4079,8 +4085,9 @@ class Handler(BaseHTTPRequestHandler):
                 identity = (query.get("id") or [""])[0]
                 if path.endswith("/jobs"):
                     return self.json_out(remote_manager().job(identity))
+                observed = server_binding_snapshot(identity)
                 result = remote_manager().inbounds(identity)
-                result['subscriptionCleanup'] = reconcile_server_nodes(identity, result['inbounds'])
+                result['subscriptionCleanup'] = reconcile_server_nodes(identity, result['inbounds'], observed)
                 return self.json_out(result)
             if path == "/admin/api/account":
                 self.json_out({"username": load_auth()["username"]})

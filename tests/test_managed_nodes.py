@@ -105,5 +105,14 @@ class ManagedNodesTests(unittest.TestCase):
         server.cleanup_missing_nodes('clash')
         self.assertIn('localNodesRemovedAt',binding)
 
+    def test_stale_inventory_never_removes_a_new_binding_generation(self):
+        record,binding,node=self.owned()
+        observed=server.server_binding_snapshot('server-a')
+        binding['userEmail']='new-generation'
+        server.save_profiles(server.load_profiles())
+        self.assertEqual(server.reconcile_server_nodes('server-a',[],observed)['removed'],0)
+        self.assertEqual(binding['status'],'active')
+        self.assertEqual(len(server.read_config()['proxies']),1)
+
 
 if __name__=='__main__':unittest.main()
