@@ -17,6 +17,8 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    window.sent=[];window.failUser=false;
    api=async(url,opt)=>{
     if(url==='/snapshot')return S.data;
+    if(url==='/servers/users/targets')return {profiles:S.profiles.map(p=>({...p,importedInboundIds:[]}))};
+    if(url==='/servers/users/batch'){window.sent.push({payload:JSON.parse(opt.body),profile:opt.headers['X-Profile']});return {results:[{inboundId:7,ok:!window.failUser,added:window.failUser?0:1,error:window.failUser?'远端用户接口暂不可用，请重试':''}]};}
     if(url==='/servers/users'){
      window.sent.push({payload:JSON.parse(opt.body),profile:opt.headers['X-Profile']});
      if(window.failUser)throw Error('远端用户接口暂不可用，请重试');
@@ -32,10 +34,10 @@ const puppeteer=require('puppeteer-core'),fs=require('fs'),path=require('path'),
    assert(await page.$('#sharedUserForm'));assert(!await page.$('#remoteDedicated'));
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
    if(process.env.MXIOC_SCREENSHOT_DIR){fs.mkdirSync(process.env.MXIOC_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.MXIOC_SCREENSHOT_DIR,theme+'-shared-user-'+width+'.png'),fullPage:true});}
-   await page.click('#sharedUserSave');await page.waitForSelector('#modal.hidden');
-   const sent=await page.evaluate(()=>window.sent.at(-1));assert.deepEqual(sent,{payload:{serverId:'server-1',inboundId:7},profile:'clash'});
-   await page.evaluate(()=>{window.failUser=true;remoteNodeLinks(7);});await page.click('#sharedUserSave');
-   await page.waitForFunction(()=>$('sharedUserError')?.textContent.includes('重试'));
+   await page.click('#sharedUserSave');await page.waitForFunction(()=>$('sharedUserProgress')?.textContent.includes('已保存 1'));await page.evaluate(()=>closeModal());
+   const sent=await page.evaluate(()=>window.sent.at(-1));assert.deepEqual(sent,{payload:{serverId:'server-1',inboundIds:[7]},profile:'clash'});
+   await page.evaluate(async()=>{window.failUser=true;await remoteNodeLinks(7);});await page.click('#sharedUserSave');
+   await page.waitForFunction(()=>$('sharedUserResults')?.textContent.includes('重试'));
    assert(!await page.$eval('#sharedUserSave',n=>n.disabled));
    const before=await page.evaluate(()=>window.sent.length);
    await page.evaluate(()=>{S.profile='other';});await page.click('#sharedUserSave');

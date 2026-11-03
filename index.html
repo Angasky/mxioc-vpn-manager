@@ -2507,14 +2507,21 @@ function sharedRemoteInbound(row) {
 }
 
 function renderRemoteNodes() {
+  if(S.remoteNodeSelectionServer!==S.serverId){S.remoteNodeSelectionServer=S.serverId;S.remoteNodeSelection=new Set();}
+  const live=new Set(S.remoteRows.map(row=>row.id));S.remoteNodeSelection=new Set([...S.remoteNodeSelection].filter(id=>live.has(id)));
+  const canImport=row=>['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol)&&row.enable!==false;
   const q = S.filters.remoteNodes || '', s = S.remoteServer;
   const page = tableSlice(S.remoteRows.filter(x => `${x.remark} ${x.protocol} ${x.port}`.toLowerCase().includes(q.toLowerCase())), 'serverNodes');
   $('content').innerHTML = `<section class="panel"><div class="panel-head"><div><h3>${esc(s.name)} · ${esc(s.host)}</h3><p class="muted">${esc(s.installType || '3x-ui')} · 复用入站，为每个订阅分配独立用户。独立内核仅展示总控创建的入站。</p></div><div class="toolbar"><button class="btn" onclick="go('nodes')">返回总控节点</button><button class="btn" onclick="chooseNodeServer()">切换服务器</button><button class="btn" onclick="go('traffic')">流量与有效期</button><button class="btn primary" onclick="sharedUserPicker()">${uiIcon('circle-plus')}添加订阅节点</button><button class="btn primary" onclick="remoteNodeForm(true)">${uiIcon('circle-plus')}添加中转</button></div></div>
-    <div class="toolbar"><input id="search" aria-label="搜索远端节点" placeholder="搜索节点名称、协议、端口…" value="${esc(q)}"></div>
-    <div class="tablewrap"><table><thead><tr><th>ID</th><th>名称</th><th>协议 / 端口</th><th>状态</th><th>上传 / 下载</th><th>订阅联动</th><th>操作</th></tr></thead><tbody>
-    ${page.rows.map(x => `<tr><td>${x.id}</td><td>${esc(x.remark)}</td><td><code>${esc(x.protocol)} : ${x.port}</code></td><td>${x.enable ? '启用' : '停用'}</td><td>${formatBytes(x.up || 0)} / ${formatBytes(x.down || 0)}</td><td>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? '<span class="pill">已绑定当前订阅</span>' : '<span class="muted">未绑定当前订阅</span>'}</td><td>
-      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>批量加入订阅</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">暂无匹配的远端入站</td></tr>'}
+    <div class="toolbar"><button id="remoteBatchImport" class="btn" onclick="remoteNodeBatchLinks()">批量导入订阅</button><button id="remoteSelectionClear" class="btn small">取消节点选择</button><input id="search" aria-label="搜索远端节点" placeholder="搜索节点名称、协议、端口…" value="${esc(q)}"></div>
+    <div class="tablewrap"><table><thead><tr><th><input id="remoteNodesAll" type="checkbox" aria-label="全选本页可导入节点"></th><th>ID</th><th>名称</th><th>协议 / 端口</th><th>状态</th><th>上传 / 下载</th><th>订阅联动</th><th>操作</th></tr></thead><tbody>
+    ${page.rows.map(x => `<tr><td><input type="checkbox" class="remoteNodeChoice" value="${x.id}" ${canImport(x)?'':'disabled'} ${S.remoteNodeSelection.has(x.id)?'checked':''} aria-label="选择 ${esc(x.remark)}"></td><td>${x.id}</td><td>${esc(x.remark)}</td><td><code>${esc(x.protocol)} : ${x.port}</code></td><td>${x.enable ? '启用' : '停用'}</td><td>${formatBytes(x.up || 0)} / ${formatBytes(x.down || 0)}</td><td>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? '<span class="pill">已绑定当前订阅</span>' : '<span class="muted">未绑定当前订阅</span>'}</td><td>
+      <button class="btn small" onclick="remoteNodeEdit(${x.id})">编辑</button><button class="btn small" onclick="remoteNodeToggle(${x.id})">${x.enable ? '停用整个入站' : '启用整个入站'}</button><button class="btn small" onclick="remoteNodeLinks(${x.id})" ${['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(x.protocol) ? '' : 'disabled title="此协议模板暂不支持独立用户"'}>批量加入订阅</button>${(S.data?.profile?.traffic?.bindings || []).some(b=>b.serverId===S.serverId && b.inboundId===x.id && b.status==='active') ? `<button class="btn small" onclick="nodeBandwidthModal('${encodeURIComponent(S.serverId).replace(/'/g,'%27')}',${x.id})">节点限速</button>` : ''}<button class="btn small" onclick="remoteNodeLinks(${x.id})" ${!x.shareLinks?.length ? 'disabled' : ''}>链接 / 导入</button><button class="btn small danger" onclick="remoteNodeDelete(${x.id})">删除</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">暂无匹配的远端入站</td></tr>'}
     </tbody></table></div>${pagination(page)}</section>`;
+  const updateSelection=()=>{const selected=S.remoteNodeSelection.size,available=page.rows.filter(canImport);$('remoteBatchImport').disabled=!selected;$('remoteBatchImport').textContent=`将所选 ${selected} 个节点导入订阅`;$('remoteSelectionClear').disabled=!selected;$('remoteNodesAll').checked=!!available.length&&available.every(row=>S.remoteNodeSelection.has(row.id));$('remoteNodesAll').indeterminate=available.some(row=>S.remoteNodeSelection.has(row.id))&&!$('remoteNodesAll').checked;};
+  document.querySelectorAll('.remoteNodeChoice').forEach(input=>input.onchange=()=>{const id=Number(input.value);if(input.checked&&S.remoteNodeSelection.size>=50){input.checked=false;return notice('一次最多选择 50 个节点');}input.checked?S.remoteNodeSelection.add(id):S.remoteNodeSelection.delete(id);updateSelection();});
+  $('remoteNodesAll').onchange=event=>{for(const row of page.rows.filter(canImport)){if(event.target.checked&&S.remoteNodeSelection.size<50)S.remoteNodeSelection.add(row.id);else if(!event.target.checked)S.remoteNodeSelection.delete(row.id);}renderRemoteNodes();};
+  $('remoteSelectionClear').onclick=()=>{S.remoteNodeSelection.clear();renderRemoteNodes();};updateSelection();
   bindSearch('remoteNodes', renderRemoteNodes);
 }
 
@@ -2862,36 +2869,57 @@ async function importRemoteLinks(links, source) {
   await reload(false); notice(`已导入 ${result.added} 个节点到当前订阅`);
 }
 
-function remoteNodeLinks(id, sourceRows = S.remoteRows, sourceServerId = S.serverId) {
-  const row = sourceRows.find(x => x.id === id); if (!row) return;
-  if (!['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol)) return remoteNodeLegacyLinks(id);
-  const profile = S.profile, serverId = sourceServerId, selected = new Set([profile]), done = new Set();
-  const profiles = S.profiles.slice(), results = [];
-  openModal('节点批量加入订阅', `<form id="sharedUserForm"><p>${esc(row.remark || row.protocol)} · ${esc(row.port)}</p>
-    <p class="hint">为每份订阅建立独立用户：VLESS / VMess 使用独立 UUID，HY2 使用独立认证密码。自动启用独立流量计量和到期撤销，保留已有套餐、用量和有效期；重复添加复用本订阅用户。</p>
-    <div class="toolbar"><input id="sharedProfileSearch" type="search" placeholder="搜索订阅" aria-label="搜索订阅"><button id="sharedProfilesAll" type="button" class="btn">全选筛选结果</button><button id="sharedProfilesClear" type="button" class="btn">清空选择</button></div>
-    <div id="sharedProfileList" class="checks" style="max-height:min(42vh,320px);overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px">${profiles.map(p=>`<label class="choice shared-profile" data-profile="${esc(p.id)}"><input type="checkbox" class="sharedProfileChoice" value="${esc(p.id)}" ${p.id===profile?'checked':''}><span>${esc(p.name)}</span></label>`).join('')}</div>
-    <p id="sharedUserProgress" class="hint" aria-live="polite"></p><div id="sharedUserResults" style="max-height:180px;overflow:auto" aria-live="polite"></div>
-    <div id="sharedUserError" class="error" role="alert"></div><button id="sharedUserSave" class="btn primary">导入所选订阅</button></form>`);
-  const form=$('sharedUserForm'), search=$('sharedProfileSearch');let busy=false;
+async function remoteNodeLinks(id, sourceRows = S.remoteRows, sourceServerId = S.serverId) {
+  const ids = [...new Set(Array.isArray(id) ? id : [id])], rows = ids.map(id=>sourceRows.find(row=>row.id===id));
+  if (!rows.length || rows.some(row=>!row)) return;
+  if (rows.some(row=>!['vless','vmess','trojan','hysteria','hysteria2','tuic'].includes(row.protocol))) {
+    if (ids.length===1) return remoteNodeLegacyLinks(ids[0]);
+    return alert('请选择支持独立订阅用户的节点');
+  }
+  const profile=S.profile,page=S.page,serverId=sourceServerId;
+  let status;
+  try { status=await api('/servers/users/targets',jsonOpt('POST',{serverId,inboundIds:ids})); }
+  catch(error){return alert(error.message);}
+  if(S.profile!==profile || S.page!==page)return;
+  const imported=new Map(status.profiles.map(p=>[p.id,new Set(p.importedInboundIds||[])]));
+  const missing=p=>ids.filter(id=>!imported.get(p.id)?.has(id));
+  const profiles=status.profiles.filter(p=>missing(p).length),selected=new Set(),results=new Map();
+  if(profiles.some(p=>p.id===profile))selected.add(profile);else if(profiles.length===1)selected.add(profiles[0].id);
+  if(!profiles.length){openModal('批量导入订阅','<p class="hint">所选节点已导入全部订阅，无需重复导入。</p>');return;}
+  openModal(`将 ${ids.length} 个服务器节点导入订阅`, `<form id="sharedUserForm"><p class="hint">每份订阅创建独立 UUID / 密码。已导入全部所选节点的订阅已隐藏；部分导入的只补充缺少的节点。创建结果待核对的仍可重试。</p>
+    <input id="sharedProfileSearch" placeholder="搜索订阅名称" aria-label="搜索订阅名称"><div class="toolbar"><button type="button" id="sharedProfilesAll" class="btn small">全选可见订阅</button><button type="button" id="sharedProfilesClear" class="btn small">取消选择</button></div>
+    <div id="sharedProfileList" class="checks" style="max-height:280px;overflow:auto;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px">${profiles.map(p=>`<label class="choice shared-profile" data-profile="${esc(p.id)}"><input type="checkbox" class="sharedProfileChoice" value="${esc(p.id)}"><span>${esc(p.name)} <small data-pending="${esc(p.id)}"></small></span></label>`).join('')}</div>
+    <p id="sharedUserProgress" class="hint" aria-live="polite"></p><div id="sharedUserResults" style="max-height:180px;overflow:auto" aria-live="polite"></div><div id="sharedUserError" class="error" role="alert"></div><button id="sharedUserSave" class="btn primary">导入所选订阅</button></form>`);
+  const form=$('sharedUserForm'),search=$('sharedProfileSearch');let busy=false;
   const visible=p=>String(p.name||p.id).toLowerCase().includes(search.value.trim().toLowerCase());
-  const update=()=>{if(!form.isConnected)return;form.querySelectorAll('.shared-profile').forEach(label=>{const p=profiles.find(p=>p.id===label.dataset.profile);label.hidden=!visible(p);const input=label.querySelector('input');input.checked=selected.has(p.id);input.disabled=busy||done.has(p.id);});$('sharedUserSave').disabled=busy||![...selected].some(id=>!done.has(id));$('sharedUserSave').textContent=busy?'正在创建独立用户…':`导入所选 ${[...selected].filter(id=>!done.has(id)).length} 份订阅`;$('sharedProfilesAll').disabled=$('sharedProfilesClear').disabled=busy;};
+  const update=()=>{if(!form.isConnected)return;form.querySelectorAll('.shared-profile').forEach(label=>{const p=profiles.find(p=>p.id===label.dataset.profile),pending=missing(p);label.hidden=!visible(p)||!pending.length;const input=label.querySelector('input');input.checked=selected.has(p.id);input.disabled=busy||!pending.length;label.querySelector('small').textContent=`待导入 ${pending.length} / ${ids.length} 个`;});const count=profiles.filter(p=>selected.has(p.id)).reduce((n,p)=>n+missing(p).length,0);$('sharedUserSave').disabled=busy||!count;$('sharedUserSave').textContent=busy?'正在创建独立用户…':`导入 ${count} 个节点到所选订阅`;$('sharedProfilesAll').disabled=$('sharedProfilesClear').disabled=busy;};
   search.oninput=update;search.onkeydown=event=>{if(event.key==='Enter')event.preventDefault();};form.querySelectorAll('.sharedProfileChoice').forEach(input=>input.onchange=()=>{input.checked?selected.add(input.value):selected.delete(input.value);update();});
-  $('sharedProfilesAll').onclick=()=>{profiles.filter(visible).filter(p=>!done.has(p.id)).forEach(p=>selected.add(p.id));update();};$('sharedProfilesClear').onclick=()=>{selected.clear();update();};update();
-  $('sharedUserForm').onsubmit = async e => {
-    e.preventDefault();if(busy)return;const targets=profiles.filter(p=>selected.has(p.id)&&!done.has(p.id));if(!targets.length)return;busy=true;update();$('sharedUserError').textContent='';
-    try {
-      for(const target of targets){if(!form.isConnected)break;$('sharedUserProgress').textContent=`正在处理 ${target.name} · ${done.size} 份已完成`;
-        const options=jsonOpt('POST',{serverId,inboundIds:[id]});options.headers['X-Profile']=target.id;
-        try{const response=await api('/servers/users/batch',options),result=response.results?.find(item=>item.inboundId===id);if(!result?.ok)throw Error(result?.error||'结果未确认，请重试核对');done.add(target.id);results.push({id:target.id,name:target.name,ok:true,warning:result.warning||''});}
-        catch(error){results.push({id:target.id,name:target.name,ok:false,error:error.message});}
-        if(!form.isConnected)break;$('sharedUserResults').innerHTML=results.map(item=>`<p class="${item.ok?'hint':'error'}">${esc(item.name)}：${item.ok?'已保存独立用户'+(item.warning?' · '+esc(item.warning):''):esc(item.error)}</p>`).join('');
+  $('sharedProfilesAll').onclick=()=>{profiles.filter(visible).filter(p=>missing(p).length).forEach(p=>selected.add(p.id));update();};$('sharedProfilesClear').onclick=()=>{selected.clear();update();};update();
+  form.onsubmit=async event=>{
+    event.preventDefault();if(busy||S.profile!==profile||S.page!==page)return;const targets=profiles.filter(p=>selected.has(p.id)&&missing(p).length);if(!targets.length)return;busy=true;update();$('sharedUserError').textContent='';
+    try{
+      for(const target of targets){
+        const pending=missing(target);
+        for(let offset=0;offset<pending.length;offset+=3){
+          if(!form.isConnected||S.profile!==profile||S.page!==page)break;
+          const batch=pending.slice(offset,offset+3);$('sharedUserProgress').textContent=`正在处理 ${target.name} · ${batch.length} 个节点`;
+          const options=jsonOpt('POST',{serverId,inboundIds:batch});options.headers['X-Profile']=target.id;
+          try{const response=await api('/servers/users/batch',options);for(const inboundId of batch){const result=response.results?.find(item=>item.inboundId===inboundId),ok=!!result?.ok;if(ok)imported.get(target.id).add(inboundId);results.set(JSON.stringify([target.id,inboundId]),{name:target.name,inboundId,ok,error:result?.error||'结果未确认，请重试核对',warning:result?.warning||''});}}
+          catch(error){for(const inboundId of batch)results.set(JSON.stringify([target.id,inboundId]),{name:target.name,inboundId,ok:false,error:error.message});}
+          if(!form.isConnected||S.profile!==profile||S.page!==page)break;
+          $('sharedUserResults').innerHTML=[...results.values()].map(item=>`<p class="${item.ok?'hint':'error'}">${esc(item.name)} · 入站 ${item.inboundId}：${item.ok?'已保存独立用户'+(item.warning?' · '+esc(item.warning):''):esc(item.error)}</p>`).join('');update();
+        }
       }
-      S.remoteLoaded=false;if(form.isConnected){const failed=results.filter(r=>!r.ok&&!done.has(r.id)).length;$('sharedUserProgress').textContent=`已保存 ${done.size} 份订阅${failed?'，失败项可直接重试':''}。`;}
-      await reload(false);
-    } catch (error) { if ($('sharedUserError')) $('sharedUserError').textContent = error.message; }
-    finally {busy=false;update();}
+      S.remoteLoaded=false;if(form.isConnected){const all=[...results.values()];$('sharedUserProgress').textContent=`已保存 ${all.filter(item=>item.ok).length} 个节点，失败 ${all.filter(item=>!item.ok).length} 个；失败项可重试，成功项不会重复下发。`;}
+      if(S.profile===profile)await reload(false);
+    }catch(error){if(form.isConnected)$('sharedUserError').textContent=error.message;}
+    finally{busy=false;update();}
   };
+}
+
+function remoteNodeBatchLinks(){
+  const ids=[...(S.remoteNodeSelection||[])];
+  if(ids.length)void remoteNodeLinks(ids);
 }
 
 function remoteNodeLegacyLinks(id) {

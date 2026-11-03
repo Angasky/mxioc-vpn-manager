@@ -1042,6 +1042,8 @@ def import_server_inbound(payload):
                     write_config(doc, "server-inbound-import")
                 if own:
                     own["importedNames"] = names
+                    from managed_nodes import references
+                    own["importedNodes"] = references([n for n in nodes if n.get("name") in names])
                     save_profiles(load_profiles())
             return {"added": len(added), "updated": len(updated), "existing": len(names)-len(added), "names": names,
                     "bound": bool(own), "enforcementEnabled": bool((record.get("traffic") or {}).get("enforce"))}
@@ -1085,6 +1087,8 @@ def import_owned_user_links(record, binding, links):
             added = 1
         write_config(doc, 'subscription-user-import')
         binding['importedNames'] = [node['name']]
+        from managed_nodes import references
+        binding['importedNodes'] = references([node])
         binding.pop('pendingClient', None)
         save_profiles(load_profiles())
         return {'added': added, 'existing': 1-added, 'bound': True,
@@ -1402,6 +1406,124 @@ def sync_monthly_pause(manager, record, binding, row):
             save_profiles(load_profiles())
 
 
+
+def cleanup_missing_nodes(profile_id, include_revoked=False, only_binding=None):
+    from managed_nodes import owns_node
+    with ENFORCEMENT_LOCK, LOCK:
+        previous = getattr(CTX, 'profile', 'clash')
+        CTX.profile = profile_id
+        try:
+            record = profile_record(profile_id)
+            bindings = [b for b in record.get('remoteNodes', []) if (b.get('status') == 'missing' or b.get('localCleanupPending') or (include_revoked and b.get('status') == 'revoked')) and (only_binding is None or (b.get('serverId'), b.get('inboundId')) == only_binding)]
+            if not bindings:
+                return 0
+            doc = read_config()
+            removed = {n['name'] for n in doc.get('proxies', []) if any(owns_node(b, n) for b in bindings)}
+            # A chain referencing a deleted entry is unusable too.
+            while True:
+                dependent = {n['name'] for n in doc.get('proxies', []) if n.get('dialer-proxy') in removed}
+                if dependent <= removed:
+                    break
+                removed |= dependent
+            files = current_files()
+            raw = files[0].read_bytes()
+            repair_mirrors = any(not path.is_file() or path.read_bytes() != raw for path in files[1:])
+            if removed:
+                doc['proxies'] = [n for n in doc.get('proxies', []) if n.get('name') not in removed]
+                for name in removed:
+                    replace_references(doc, name)
+                for group in doc.get('proxy-groups', []):
+                    if not group.get('proxies') and not group.get('use'):
+                        group['proxies'] = ['DIRECT']
+            if removed or repair_mirrors:
+                write_config(doc, 'remote-node-missing')
+            # Persist markers only after YAML/mirrors succeed; failed cleanup retries.
+            changed = bool(removed) or any(not b.get('localNodesRemovedAt') or b.get('localCleanupPending') for b in bindings)
+            markers = [(b, b.get('localNodesRemovedAt'), b.get('localCleanupPending')) for b in bindings]
+            for binding in bindings:
+                binding['localNodesRemovedAt'] = binding.get('localNodesRemovedAt') or int(time.time())
+                binding.pop('localCleanupPending', None)
+            if changed:
+                try:
+                    save_profiles(load_profiles())
+                except Exception:
+                    for binding, old_marker, pending in markers:
+                        if old_marker is None: binding.pop('localNodesRemovedAt', None)
+                        else: binding['localNodesRemovedAt'] = old_marker
+                        if pending is not None: binding['localCleanupPending'] = pending
+                    raise
+            return len(removed)
+        finally:
+            CTX.profile = previous
+
+
+def reconcile_server_nodes(server_id, rows):
+    if not isinstance(rows, list) or any(not isinstance(r, dict) or type(r.get('id')) is not int or r['id'] <= 0 for r in rows):
+        raise ValueError('服务器入站列表不完整，未清理订阅节点')
+    live = {r['id'] for r in rows}
+    if len(live) != len(rows):
+        raise ValueError('服务器入站 ID 重复，未清理订阅节点')
+    removed, errors = 0, []
+    with ENFORCEMENT_LOCK:
+        with LOCK:
+            affected = []
+            for record in load_profiles()['profiles']:
+                for binding in record.get('remoteNodes', []):
+                    if binding.get('serverId') != server_id:
+                        continue
+                    if binding.get('inboundId') not in live and binding.get('status') in ('active', 'provisioning'):
+                        binding.update(status='missing', error='远端入站已不存在')
+                    if binding.get('status') == 'missing':
+                        affected.append(record['id'])
+            save_profiles(load_profiles())
+        for profile_id in dict.fromkeys(affected):
+            try:
+                removed += cleanup_missing_nodes(profile_id)
+            except Exception:
+                errors.append('订阅节点清理失败，已保留身份记录，稍后自动重试')
+    return {'removed': removed, 'errors': errors}
+
+
+def reconcile_profile_inventory(profile_id):
+    record = profile_record(profile_id)
+    try:
+        cleanup_missing_nodes(profile_id)
+    except Exception:
+        return False
+    server_ids = {b['serverId'] for b in record.get('remoteNodes', []) if b.get('status') in ('active', 'provisioning')}
+    ok = True
+    for server_id in server_ids:
+        try:
+            rows = remote_manager().inbounds(server_id)['inbounds']
+            ok = not reconcile_server_nodes(server_id, rows)['errors'] and ok
+        except Exception:
+            ok = False  # An offline server is not evidence that any node was deleted.
+    return ok
+
+
+def subscription_import_targets(payload):
+    from managed_nodes import owns_node
+    server_id, ids = payload.get('serverId'), payload.get('inboundIds')
+    if not isinstance(server_id, str) or not server_id or not isinstance(ids, list) or not 1 <= len(ids) <= 50 or any(type(i) is not int or i <= 0 for i in ids) or len(set(ids)) != len(ids):
+        raise ValueError('请选择 1–50 个不重复的有效入站 ID')
+    result = []
+    with ENFORCEMENT_LOCK, LOCK:
+        previous = getattr(CTX, 'profile', 'clash')
+        try:
+            for record in load_profiles()['profiles']:
+                CTX.profile = record['id']
+                try:
+                    nodes = read_config(copy_doc=False).get('proxies', [])
+                except Exception:
+                    result.append({'id':record['id'], 'name':record.get('name',record['id']), 'importedInboundIds':[], 'error':'订阅配置读取失败'})
+                    continue
+                imported = sorted({b['inboundId'] for b in record.get('remoteNodes', []) if b.get('serverId') == server_id and b.get('inboundId') in ids and b.get('status') == 'active' and any(owns_node(b, n) for n in nodes)})
+                result.append({'id':record['id'], 'name':record.get('name',record['id']), 'importedInboundIds':imported})
+        finally:
+            CTX.profile = previous
+    return {'profiles':result}
+
+
 def enforce_profile(profile_id, revoke=True, only_binding=None):
     """Accumulate deltas and retry remote revocation, including after restart.
 
@@ -1418,7 +1540,7 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                 bindings = [b for b in bindings if (b["serverId"], b["inboundId"]) == only_binding]
             enabled = bool((record.get("traffic") or {}).get("enforce"))
         if not enabled:
-            return True
+            return reconcile_profile_inventory(profile_id)
         manager, snapshots, errors = remote_manager(), {}, []
         mismatches = set()
         # Expiry must still revoke nodes when usage retrieval fails.
@@ -1530,6 +1652,7 @@ def enforce_profile(profile_id, revoke=True, only_binding=None):
                     current[local_key + "Remainder"] = remainder
                     current[remote_key] = value
                 stored["updatedAt"] = int(time.time())
+        cleanup_missing_nodes(profile_id)
         with LOCK:
             record = profile_record(profile_id)
             if not revoke:
@@ -1588,7 +1711,7 @@ def enforcement_loop():
             changed = any([reset_monthly_traffic(r) for r in load_profiles()["profiles"]])
             if changed:
                 save_profiles(load_profiles())
-            identities = [r["id"] for r in load_profiles()["profiles"] if (r.get("traffic") or {}).get("enforce")]
+            identities = [r["id"] for r in load_profiles()["profiles"] if (r.get("traffic") or {}).get("enforce") or any(b.get('status') in ('active', 'provisioning') or (b.get('status') == 'missing' and not b.get('localNodesRemovedAt')) or b.get('localCleanupPending') for b in r.get('remoteNodes', []))]
         for identity in identities:
             try:
                 enforce_profile(identity)
@@ -3954,7 +4077,11 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/admin/api/servers/jobs", "/admin/api/servers/inbounds"):
                 query = parse_qs(urlparse(self.path).query)
                 identity = (query.get("id") or [""])[0]
-                return self.json_out(remote_manager().job(identity) if path.endswith("/jobs") else remote_manager().inbounds(identity))
+                if path.endswith("/jobs"):
+                    return self.json_out(remote_manager().job(identity))
+                result = remote_manager().inbounds(identity)
+                result['subscriptionCleanup'] = reconcile_server_nodes(identity, result['inbounds'])
+                return self.json_out(result)
             if path == "/admin/api/account":
                 self.json_out({"username": load_auth()["username"]})
                 return
@@ -4064,6 +4191,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_out(remote_manager().test_sni(str(data.get("serverId", "")), data.get("candidates"), force=data.get("force") is True))
             if path == "/admin/api/servers/certificates":
                 return self.json_out({'job': remote_manager().certificate_job(str(data.get('serverId', '')), data)}, 202)
+            if path == "/admin/api/servers/users/targets":
+                return self.json_out(subscription_import_targets(data))
             if path == "/admin/api/servers/users/batch":
                 self.select_profile()
                 return self.json_out({"ok": True, **batch_subscription_users(data)})
@@ -4237,8 +4366,10 @@ class Handler(BaseHTTPRequestHandler):
                         for record in load_profiles()["profiles"]:
                             for binding in record.get("remoteNodes", []):
                                 if (binding["serverId"], binding["inboundId"]) == (server_id, identity):
-                                    binding.update(status="revoked", revokedAt=int(time.time()))
+                                    binding.update(status="revoked", revokedAt=int(time.time()), localCleanupPending=True)
                         save_profiles(load_profiles())
+                    for record in load_profiles()['profiles']:
+                        cleanup_missing_nodes(record['id'], include_revoked=True, only_binding=(server_id, identity))
                     return self.json_out({"ok": True, **result})
             self.select_profile()
             if path == "/admin/api/failovers":
