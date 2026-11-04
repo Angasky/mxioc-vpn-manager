@@ -2033,6 +2033,207 @@ def profile_locked(function):
     return wrapped
 
 
+
+def group_rule_lines(lines, action):
+    if not isinstance(lines, list) or len(lines) > 2000:
+        raise ValueError("策略组规则最多 2000 条")
+    result = []
+    for entry in lines:
+        if not isinstance(entry, str) or len(entry) > 4096 or any(c in entry for c in "\r\n\x00"):
+            raise ValueError("分流规则必须是一行文本")
+        line = entry.strip()
+        if not line:
+            continue
+        if "," not in line:
+            if not re.fullmatch(r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", line):
+                raise ValueError("请输入域名，或使用 DOMAIN-SUFFIX,域名 格式")
+            line = "DOMAIN-SUFFIX," + line
+        kind, value = line.split(",", 1)
+        kind = kind.strip().upper()
+        if kind in ("MATCH", "RAW") or not re.fullmatch(r"[A-Z][A-Z0-9-]*", kind) or not value.strip(", "):
+            raise ValueError("兜底 MATCH 请在分流规则页编辑")
+        values = value.rsplit(",", 1)
+        if len(values) == 2 and values[1] in ("no-resolve", "src"):
+            raw = f"{kind},{values[0]},{action},{values[1]}"
+        else:
+            raw = f"{kind},{value},{action}"
+        if raw not in result:
+            result.append(raw)
+    return result
+
+
+def replace_group_rules(doc, name, replacements):
+    rules = doc.get("rules", [])
+    def belongs(raw):
+        item = rule_parts(raw)
+        return item["type"] != "MATCH" and item["action"] == name
+    remaining = iter(replacements)
+    updated = []
+    last = None
+    for raw in rules:
+        if belongs(raw):
+            replacement = next(remaining, None)
+            if replacement is not None:
+                updated.append(replacement)
+            last = len(updated)
+        else:
+            updated.append(raw)
+    at = 0 if last is None else last
+    updated[at:at] = list(remaining)
+    doc["rules"] = updated
+
+
+POLICY_TEMPLATE_FIELDS = {"name", "type", "proxies", "url", "interval", "lazy", "tolerance",
+                          "strategy", "timeout", "max-failed-times", "expected-status"}
+
+
+def validate_policy_groups(groups):
+    members = {group["name"]: group.get("proxies") or [] for group in groups}
+    seen, active = set(), set()
+
+    def visit(name):
+        if name in active:
+            raise ValueError("策略组不能循环引用")
+        if name in seen:
+            return
+        active.add(name)
+        for ref in members[name]:
+            if ref in members:
+                visit(ref)
+        active.remove(name)
+        seen.add(name)
+
+    for name in members:
+        visit(name)
+
+
+def policy_template_config(doc, groups, rules):
+    if not isinstance(groups, list) or len(groups) > 128 or not isinstance(rules, list) or len(rules) > 5000:
+        raise ValueError("策略组或规则格式无效，最多 128 个策略组和 5000 条规则")
+    for group in groups:
+        if not isinstance(group, dict) or set(group) - POLICY_TEMPLATE_FIELDS:
+            raise ValueError("模板策略组含不支持的字段")
+        name = group.get("name")
+        refs = group.get("proxies")
+        if (not isinstance(name, str) or name != name.strip() or not name or len(name) > 120
+                or any(c in name for c in ",\r\n\x00") or name in BUILTINS
+                or group.get("type") not in ("select", "url-test", "fallback", "load-balance")
+                or not isinstance(refs, list) or not refs or not all(isinstance(ref, str) for ref in refs)):
+            raise ValueError("模板策略组必须有合法名称、类型和至少一个成员")
+        if "url" in group:
+            url = urlparse(str(group["url"]))
+            if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
+                raise ValueError("测速地址须为不含账号密码的 HTTP(S) 地址")
+    known = {group["name"] for group in groups} | BUILTINS
+    providers = doc.get("rule-providers") or {}
+    matches = []
+    for index, raw in enumerate(rules):
+        if not isinstance(raw, str) or len(raw) > 4096 or any(c in raw for c in "\r\n\x00"):
+            raise ValueError("模板规则必须为单行文本")
+        item = rule_parts(raw)
+        if item["action"] not in known:
+            raise ValueError(f"第 {index + 1} 条规则引用了不存在的策略")
+        if item["type"] == "RULE-SET" and item["value"] not in providers:
+            raise ValueError(f"第 {index + 1} 条规则引用了模板中不存在的规则集")
+        if item["type"] == "MATCH":
+            matches.append(index)
+    if matches != [len(rules) - 1]:
+        raise ValueError("模板需要一条位于最后的 MATCH 兜底规则")
+    # Bundled DNS uses fragment selectors for some built-in groups. A
+    # custom template may omit those groups, so keep DNS references valid.
+    omitted = {group["name"] for group in doc.get("proxy-groups", [])} - known
+
+    def fix_selector(server):
+        if isinstance(server, str):
+            endpoint, separator, selector = server.rpartition("#")
+            if separator and unquote(selector) in omitted:
+                return endpoint + "#DIRECT"
+        return server
+
+    policy = doc.get("dns", {}).get("nameserver-policy", {})
+    for domain, servers in policy.items():
+        policy[domain] = [fix_selector(server) for server in servers] if isinstance(servers, list) else fix_selector(servers)
+    doc["proxy-groups"], doc["rules"] = copy.deepcopy(groups), list(rules)
+    validate_config(doc)
+    validate_policy_groups(groups)
+    return doc
+
+
+def policy_template_seed(source):
+    base = empty_profile_config()
+    if source == "default":
+        return {"groups": base.get("proxy-groups", []), "rules": base.get("rules", [])}
+    if source != "current":
+        raise ValueError("未知模板来源")
+    current = read_config()
+    groups = [{key: value for key, value in group.items() if key in POLICY_TEMPLATE_FIELDS and key != "url"}
+              for group in current.get("proxy-groups", [])
+              if group.get("type") in ("select", "url-test", "fallback", "load-balance")]
+    known = {group["name"] for group in groups} | BUILTINS
+    for group in groups:
+        group["proxies"] = [ref for ref in group.get("proxies", []) or [] if ref in known] or ["DIRECT"]
+        if group["type"] != "select":
+            group["url"] = "https://www.gstatic.com/generate_204"
+    rules = []
+    fallback = "MATCH,DIRECT"
+    for raw in current.get("rules", []):
+        item = rule_parts(raw)
+        if item["action"] not in known or (item["type"] == "RULE-SET" and item["value"] not in (base.get("rule-providers") or {})):
+            continue
+        if item["type"] == "MATCH":
+            fallback = raw
+        else:
+            rules.append(raw)
+    return {"groups": groups, "rules": rules + [fallback]}
+
+
+@profile_locked
+def policy_templates_query(query):
+    templates = load_profiles().get("policyTemplates", [])
+    identity = (query.get("id") or [""])[0]
+    source = (query.get("source") or [""])[0]
+    if identity:
+        record = next((row for row in templates if row["id"] == identity), None)
+        if record is None:
+            raise ValueError("策略模板不存在")
+        return {"template": copy.deepcopy(record)}
+    if source:
+        return {"template": policy_template_seed(source)}
+    return {"templates": [{"id": row["id"], "name": row["name"]} for row in templates]}
+
+
+@profile_locked
+def save_policy_template(method, payload):
+    data = load_profiles()
+    templates = list(data.get("policyTemplates", []))
+    identity = payload.get("id")
+    position = next((i for i, row in enumerate(templates) if row["id"] == identity), None)
+    if method != "POST" and position is None:
+        raise ValueError("策略模板不存在")
+    if method == "DELETE":
+        templates.pop(position)
+        record = None
+    else:
+        name = str(payload.get("name", "")).strip()
+        if not name or len(name) > 60 or any(c in name for c in "\r\n\x00"):
+            raise ValueError("模板名称不能为空或超过 60 字")
+        if any(i != position and row["name"] == name for i, row in enumerate(templates)):
+            raise ValueError("模板名称已存在")
+        groups, rules = payload.get("groups"), payload.get("rules")
+        policy_template_config(empty_profile_config(), groups, rules)
+        if len(json.dumps({"groups": groups, "rules": rules}, ensure_ascii=False).encode("utf-8")) > 256 * 1024:
+            raise ValueError("单个模板最多 256 KB")
+        record = {"id": identity if method == "PUT" else "policy-" + secrets.token_hex(12),
+                  "name": name, "groups": groups, "rules": rules}
+        if method == "PUT":
+            templates[position] = record
+        else:
+            if len(templates) >= 40:
+                raise ValueError("最多保存 40 个策略模板")
+            templates.append(record)
+    save_profiles({**data, "policyTemplates": templates})
+    return {"ok": True, "template": record}
+
 @profile_locked
 def create_profile(payload):
     data = load_profiles()
@@ -2047,6 +2248,11 @@ def create_profile(payload):
     template_id = str(payload.get("templateId", "blank"))
     if template_id == "blank":
         doc = empty_profile_config()
+    elif template_id.startswith("policy-"):
+        template = next((row for row in data.get("policyTemplates", []) if row["id"] == template_id), None)
+        if template is None:
+            raise ValueError("策略模板不存在，请重新选择")
+        doc = policy_template_config(empty_profile_config(), template["groups"], template["rules"])
     else:
         if any(b.get("status") in ("active", "provisioning") for b in profile_record(template_id).get("remoteNodes", [])):
             raise ValueError("该模板拥有服务器专属节点，不能复制凭证供其他订阅共用；请创建空白订阅并创建新专属节点")
@@ -3416,7 +3622,8 @@ def replace_references(doc, old, new=None):
         parts = rule_parts(raw)
         if parts["action"] == old:
             if new:
-                raw = raw[:raw.rfind(old)] + new + raw[raw.rfind(old) + len(old):]
+                end = len(raw) - len(parts["options"]) - 1 if parts["options"] else len(raw)
+                raw = raw[:end - len(old)] + new + raw[end:]
             else:
                 continue
         updated.append(raw)
@@ -3768,6 +3975,7 @@ def move_node(payload):
         write_config(doc, "node-order")
 
 
+@profile_locked
 def mutate_group(method, payload):
     protect_failover_component(str(payload.get("oldName") or payload.get("name") or payload.get("config", {}).get("name", "")))
     doc = read_config()
@@ -3788,8 +3996,20 @@ def mutate_group(method, payload):
         config = dict(config)
         name = str(config.get("name", "")).strip()
         config["name"] = name
-        if not name or not config.get("type"):
-            raise ValueError("策略组名称和类型不能为空")
+        if "groupRules" in payload:
+            if any(c in name for c in ",\r\n\x00"):
+                raise ValueError("策略组名称不能包含逗号或换行")
+            current_rules = [raw for raw in doc.get("rules", []) if rule_parts(raw)["type"] != "MATCH"
+                             and rule_parts(raw)["action"] == old_name] if method == "PUT" else []
+            if payload.get("expectedGroupRules", []) != current_rules:
+                raise ValueError("策略组的分流规则已变化，请刷新后再编辑")
+            replacements = group_rule_lines(payload["groupRules"], name)
+            for raw in replacements:
+                item = rule_parts(raw)
+                if item["type"] == "RULE-SET" and item["value"] not in (doc.get("rule-providers") or {}):
+                    raise ValueError("策略组规则引用了不存在的规则集")
+        if not name or name in BUILTINS or not config.get("type"):
+            raise ValueError("策略组需要名称和类型，名称不能与内置策略重复")
         if method == "POST":
             if any(x.get("name") == name for x in groups):
                 raise ValueError("策略组名称已存在")
@@ -3803,6 +4023,10 @@ def mutate_group(method, payload):
             groups[index] = config
             if name != old_name:
                 replace_references(doc, old_name, name)
+        if "groupRules" in payload:
+            replace_group_rules(doc, name, replacements)
+            validate_config(doc)
+            validate_policy_groups(groups)
     write_config(doc, "group")
 
 
@@ -4066,6 +4290,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             return
         try:
+            if path == "/admin/api/policy-templates":
+                return self.json_out(policy_templates_query(parse_qs(urlparse(self.path).query)))
             if path == "/admin/api/profiles":
                 self.json_out({"profiles": list_profiles()})
                 return
@@ -4184,6 +4410,8 @@ class Handler(BaseHTTPRequestHandler):
                 revoke_session(self.headers.get("Authorization", ""), self.headers.get("Cookie", ""))
                 return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie(self.secure_request())})
             data = self.body()
+            if path == "/admin/api/policy-templates":
+                return self.json_out(save_policy_template("POST", data))
             if path == "/admin/api/profiles":
                 return self.json_out({"ok": True, "profile": create_profile(data)})
             if path == "/admin/api/servers":
@@ -4300,6 +4528,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             data = self.body()
+            if path == "/admin/api/policy-templates":
+                return self.json_out(save_policy_template("PUT", data))
             if path == "/admin/api/profiles":
                 return self.json_out({"ok": True, "profile": update_profile(data)})
             if path == "/admin/api/servers":
@@ -4360,6 +4590,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             data = self.body()
+            if path == "/admin/api/policy-templates":
+                return self.json_out(save_policy_template("DELETE", data))
             if path == "/admin/api/profiles":
                 delete_profile(str(data.get("id", "")))
                 return self.json_out({"ok": True})

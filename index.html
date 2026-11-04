@@ -2028,7 +2028,7 @@ function profiles() {
   const page = tableSlice(rows, 'profiles');
   const current = S.profiles.find(p => p.id === S.profile);
   $('content').innerHTML = `<section class="panel"><div class="panel-head"><div class="profile-summary"><h3>我的订阅</h3><p class="muted">共 ${S.profiles.length} 份订阅 · 当前：${esc(current?.name || '未选择')}</p></div>
-    <button class="btn primary" onclick="profileCreate()">${uiIcon('circle-plus')}新建订阅</button></div>
+    <div class="toolbar"><button class="btn" onclick="policyTemplateManager()">策略模板</button><button class="btn primary" onclick="profileCreate()">${uiIcon('circle-plus')}新建订阅</button></div></div>
     <div class="toolbar profiles-toolbar"><input id="search" aria-label="搜索订阅" placeholder="搜索订阅名称或标识…" value="${esc(q)}">
       <select id="profileFilter" aria-label="筛选订阅"><option value="all">全部订阅</option><option value="current">当前订阅</option><option value="configured">已设置流量</option><option value="expired">已到期</option></select>
       <select id="profileSort" aria-label="订阅排序"><option value="default">默认顺序</option><option value="latest">最近创建优先</option><option value="name">名称排序</option></select></div>
@@ -4634,6 +4634,8 @@ function renderGroupExtra() {
 function groupModal(index) {
   let x = index == null ? null : S.data.groups.find(n => n.index === index);
   let cfg = x?.config || { name: '', type: 'select', proxies: ['DIRECT', '✈️ Proxy'] };
+  const routingRules = x ? S.data.rules.filter(rule => rule.type !== 'MATCH' && rule.action === x.name) : [];
+  const ruleText = routingRules.map(rule => [rule.type, rule.value, rule.options].filter(Boolean).join(',')).join('\n');
   window.groupDraft = cfg;
   let selected = new Set(cfg.proxies || []);
   let available = ['DIRECT', 'REJECT', ...S.data.groups.filter(g => g.name !== x?.name).map(g => g.name), ...S.data.nodes.map(n => n.name)];
@@ -4668,11 +4670,18 @@ function groupModal(index) {
       </div>
     </fieldset>
 
+    <fieldset class="section">
+      <legend>匹配到此策略组的规则</legend>
+      <p class="hint">每行一条。直接写 binance.com 会匹配该域名及子域名，也可以写 DOMAIN,api.binance.com 或 IP-CIDR,192.0.2.0/24,no-resolve。MATCH 兜底规则在分流规则页编辑。</p>
+      <textarea id="gRoutingRules" class="raw" rows="6" spellcheck="false" placeholder="binance.com"></textarea>
+    </fieldset>
+
     <div id="formError" class="error"></div>
     <button class="btn primary" style="margin-top:16px;">${uiIcon('file-code')}保存策略组并写入 YAML</button>
   </form>`);
 
   renderGroupExtra();
+  $('gRoutingRules').value = ruleText;
 
   $('editForm').onsubmit = async e => {
     e.preventDefault();
@@ -4686,7 +4695,13 @@ function groupModal(index) {
         if (type === 'url-test') config.tolerance = Number(val('gTolerance'));
         if (type === 'load-balance') config.strategy = val('gStrategy');
       }
-      await api('/groups', jsonOpt(x ? 'PUT' : 'POST', { config, oldName: x?.name }));
+      const payload = {config, oldName: x?.name};
+      const rules = $('gRoutingRules').value;
+      if (rules !== ruleText) {
+        payload.groupRules = rules.split(/\r?\n/);
+        payload.expectedGroupRules = routingRules.map(rule => rule.raw);
+      }
+      await api('/groups', jsonOpt(x ? 'PUT' : 'POST', payload));
       closeModal();
       await reload();
       notice('策略组已保存并转换为 YAML');
@@ -4911,9 +4926,103 @@ function downloadNodeLink(filename, uri) {
 
 function profileManager() { return go('profiles'); }
 
-function profileCreate(templateId = 'blank') {
+async function policyTemplateManager() {
+  const current = S.profile;
+  openModal('策略模板', '<p id="policyTemplateLoading" class="hint">正在读取模板…</p>');
+  const loading = $('policyTemplateLoading');
+  try {
+    const data = await api('/policy-templates');
+    if (!loading.isConnected) return;
+    openModal('策略模板', `<p class="hint">模板只保存策略组和分流规则。可先在订阅中编辑策略组，再保存为模板供新订阅使用。</p>
+      <div class="toolbar"><button class="btn primary" id="policyNew">从内置模板新建</button><button class="btn" id="policyCurrent">从当前订阅提取</button></div>
+      <div id="policyTemplateRows" class="checks" style="max-height:320px;overflow:auto"></div>
+      <div id="policyTemplateError" class="error" role="alert"></div>`);
+    const rows = $('policyTemplateRows'), errorBox = $('policyTemplateError');
+    const open = async (url, button) => {
+      button.disabled = true;
+      errorBox.textContent = '';
+      try {
+        if (S.profile !== current) throw Error('当前订阅已切换，请重新打开模板管理');
+        const detail = await api(url);
+        if (rows.isConnected) policyTemplateEditor(detail.template);
+      } catch (error) {
+        if (rows.isConnected) errorBox.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
+    const create = $('policyNew'), extract = $('policyCurrent');
+    create.onclick = () => open('/policy-templates?source=default', create);
+    extract.onclick = () => open('/policy-templates?source=current', extract);
+    rows.textContent = data.templates.length ? '' : '还没有自定义模板';
+    for (const template of data.templates) {
+      const row = document.createElement('div'), button = document.createElement('button');
+      row.className = 'choice';
+      button.className = 'btn small';
+      button.textContent = '编辑';
+      button.onclick = () => open('/policy-templates?id=' + encodeURIComponent(template.id), button);
+      row.append(document.createTextNode(template.name + ' '), button);
+      rows.append(row);
+    }
+  } catch (error) {
+    if (loading.isConnected) loading.textContent = error.message;
+  }
+}
+
+function policyTemplateEditor(template) {
+  openModal(template.id ? '编辑策略模板' : '新建策略模板', `<form id="policyTemplateForm">
+    <label for="policyTemplateName">模板名称</label><input id="policyTemplateName" maxlength="60" required>
+    <label for="policyTemplateGroups">策略组（JSON）</label><textarea id="policyTemplateGroups" class="raw" rows="9" spellcheck="false" required></textarea>
+    <label for="policyTemplateRules">分流规则（每行一条，按顺序匹配）</label><textarea id="policyTemplateRules" class="raw" rows="10" spellcheck="false" required></textarea>
+    <p class="hint">例如 DOMAIN-SUFFIX,binance.com,币安。模板以最后一条 MATCH 兜底。从订阅提取时，仅保留组间引用、内置动作和内置规则集。</p>
+    <div id="policyTemplateError" class="error" role="alert"></div><div class="toolbar">
+    <button id="policyTemplateSave" class="btn primary">保存模板</button><button type="button" id="policyTemplateBack" class="btn">返回列表</button>
+    ${template.id ? '<button type="button" id="policyTemplateDelete" class="btn danger">删除模板</button>' : ''}</div></form>`);
+  const form = $('policyTemplateForm'), errorBox = $('policyTemplateError');
+  const save = $('policyTemplateSave'), back = $('policyTemplateBack'), remove = $('policyTemplateDelete');
+  $('policyTemplateName').value = template.name || '';
+  $('policyTemplateGroups').value = JSON.stringify(template.groups, null, 2);
+  $('policyTemplateRules').value = template.rules.join('\n');
+  const run = async (method, build) => {
+    if (save.disabled) return;
+    save.disabled = back.disabled = true;
+    if (remove) remove.disabled = true;
+    try {
+      await api('/policy-templates', jsonOpt(method, build()));
+      if (form.isConnected) await policyTemplateManager();
+    } catch (error) {
+      if (form.isConnected) errorBox.textContent = error.message;
+    } finally {
+      save.disabled = back.disabled = false;
+      if (remove) remove.disabled = false;
+    }
+  };
+  back.onclick = policyTemplateManager;
+  if (remove) remove.onclick = () => {
+    if (confirm('删除此模板？已经创建的订阅会保留。')) void run('DELETE', () => ({id: template.id}));
+  };
+  form.onsubmit = event => {
+    event.preventDefault();
+    void run(template.id ? 'PUT' : 'POST', () => ({
+      id: template.id, name: val('policyTemplateName'),
+      groups: JSON.parse(val('policyTemplateGroups')),
+      rules: val('policyTemplateRules').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    }));
+  };
+}
+
+async function profileCreate(templateId = 'blank') {
   const template = S.profiles.find(p => p.id === templateId);
   if (templateId !== 'blank' && !template) return notice('来源订阅已不存在，请刷新列表');
+  let templates = [];
+  if (!template) {
+    try {
+      const data = await api('/policy-templates');
+      templates = data.templates || [];
+    } catch (error) {
+      return notice(error.message);
+    }
+  }
   openModal(template ? '复制订阅' : '新建订阅', `
   <form id="createProfile">
     <fieldset class="section">
@@ -4938,8 +5047,9 @@ function profileCreate(templateId = 'blank') {
         </div>
         <div class="span2">
           <label>配置模板来源</label>
-          <input id="profileTemplate" type="hidden" value="${esc(templateId)}">
-          <div class="note">${template ? '复制“' + esc(template.name) + '”的节点、策略组和规则；流量额度独立设置。' : '创建空白配置，包含内置策略组、规则和 DNS 模板。需要复制配置时，请使用对应订阅卡片上的“复制为新订阅”。'}</div>
+          ${template ? `<input id="profileTemplate" type="hidden" value="${esc(templateId)}">` :
+            `<select id="profileTemplate"><option value="blank">内置 Clash 模板</option>${templates.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select>`}
+          <div class="note">${template ? '复制“' + esc(template.name) + '”的节点、策略组和规则；流量额度独立设置。' : '自定义模板会应用策略组与分流规则。需要复制节点时，请使用对应订阅卡片上的“复制为新订阅”。'}</div>
         </div>
       </div>
       <div id="formError" class="error"></div>
