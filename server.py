@@ -1985,7 +1985,7 @@ def detach_remote_server(server_id, confirmed=False):
         record = manager.record(server_id)
         data = load_profiles()
         bindings = [b for p in data["profiles"] for b in p.get("remoteNodes", [])
-                    if b.get("serverId") == server_id and b.get("status") == "active"]
+                    if b.get("serverId") == server_id and b.get("status") in ("active", "provisioning")]
         if (bindings or record.get("bandwidths")) and confirmed is not True:
             raise ValueError("请确认解除本总控的订阅绑定；远端节点与限速规则将保留，不再由本总控计量或到期撤销")
         original = copy.deepcopy(data)

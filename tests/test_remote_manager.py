@@ -77,6 +77,23 @@ class RemoteManagerTests(unittest.TestCase):
         restored.save({**self.payload, "id": self.identity, "sshPassword": "", "panelPassword": ""})
         self.assertEqual(restored.secret(restored.record(self.identity), "panelPassword"), self.payload["panelPassword"])
 
+    def test_remove_and_register_same_endpoint_then_retry(self):
+        self.manager.remove(self.identity, detach=True)
+        restored = remote.RemoteManager(self.root, server.parse_node_link, server.node_to_uri)
+        self.assertEqual(restored.list(), [])
+        added = restored.save(self.payload)
+        self.assertNotEqual(added["id"], self.identity)
+        self.assertEqual(restored.save({**self.payload, "sshPort": "22"})["id"], added["id"])
+        self.assertEqual(len(restored.list()), 1)
+        with self.assertRaises(ValueError):
+            restored.save({**self.payload, "sshPassword": "different-credential"})
+
+    def test_failed_registry_flush_keeps_the_original_server(self):
+        with patch.object(self.manager, "flush", side_effect=OSError("write failed")):
+            with self.assertRaises(OSError):
+                self.manager.remove(self.identity, detach=True)
+        self.assertEqual(self.manager.list()[0]["id"], self.identity)
+
     def test_invalid_targets_domains_ports_and_missing_pin_are_rejected(self):
         invalid = [{"host": "127.0.0.1"}, {"host": "169.254.169.254"}, {"host": "::1"},
                    {"host": "a;id"}, {"sshPort": "22;id"}, {"sshPort": 0}, {"fingerprint": ""},

@@ -44,6 +44,15 @@ def valid_ip(value):
     return str(address)
 
 
+def server_host_key(value):
+    host = str(value).strip().strip("[]")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host.lower()
+    return str(getattr(address, "ipv4_mapped", None) or address)
+
+
 def valid_port(value):
     if isinstance(value, bool) or not str(value).isdigit() or not 1 <= int(value) <= 65535:
         raise ValueError("端口必须是 1–65535 的整数")
@@ -513,6 +522,8 @@ class RemoteManager:
             descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 json.dump(self.data, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -616,9 +627,6 @@ class RemoteManager:
             if existing and (existing["host"], existing["sshPort"]) != (record["host"], record["sshPort"]):
                 for key in ("panelUrl", "panelPort", "panelPath", "panelTLS", "managed", "lastXrayBackup"):
                     record.pop(key, None)
-            if any(item["id"] != record["id"] and (item["host"], item["sshPort"]) == (record["host"], record["sshPort"])
-                   for item in self.data["servers"]):
-                raise ValueError("该 IP 与 SSH 端口已登记，请编辑现有服务器")
             for key, label, minimum in (("sshPassword", "SSH 密码", 1), ("panelPassword", "面板密码", 12)):
                 if key == "panelPassword" and kind not in PANEL_TYPES:
                     record[key] = self.seal("")
@@ -629,13 +637,42 @@ class RemoteManager:
                     record[key] = self.seal(text(payload[key], label, minimum))
                 elif not record.get(key):
                     raise ValueError(f"请填写{label}")
+            duplicates = [item for item in self.data["servers"]
+                          if item["id"] != record["id"] and
+                          (server_host_key(item["host"]), str(item["sshPort"])) ==
+                          (server_host_key(record["host"]), str(record["sshPort"]))]
+            if duplicates:
+                if not existing and len(duplicates) == 1 and self.same_registration(duplicates[0], record, kind):
+                    return self.public(duplicates[0])
+                raise ValueError("该 IP 与 SSH 端口已登记，请在服务器列表编辑现有记录")
             if existing:
+                previous = existing.copy()
                 existing.clear()
                 existing.update(record)
             else:
                 self.data["servers"].append(record)
-            self.flush()
+            try:
+                self.flush()
+            except Exception:
+                if existing:
+                    existing.clear()
+                    existing.update(previous)
+                else:
+                    self.data["servers"].pop()
+                raise
             return self.public(record)
+
+    def same_registration(self, existing, submitted, kind):
+        fields = ("name", "sshUser", "fingerprint", "connectionMode", "domain", "nodeAddress", "panelAddress")
+        if install_type(existing) != kind or any(existing.get(key, "") != submitted.get(key, "") for key in fields):
+            return False
+        if kind in PANEL_TYPES and existing.get("panelUser") != submitted.get("panelUser"):
+            return False
+        keys = ("sshPassword", "panelPassword") if kind in PANEL_TYPES else ("sshPassword", "coreConfig")
+        return all(secrets.compare_digest(
+            (self.secret(existing, key) if existing.get(key) else "").encode(),
+            (self.secret(submitted, key) if submitted.get(key) else "").encode(),
+        ) for key in keys)
 
     def remove(self, server_id, *, detach=False):
         with self.lock:
@@ -645,10 +682,15 @@ class RemoteManager:
                 raise ValueError("该服务器正在处理节点操作，请稍后移除")
             if any(j["serverId"] == server_id and j["status"] == "running" for j in self.data["jobs"]):
                 raise ValueError("请等待安装任务结束再移除管理")
-            self.data["servers"] = [x for x in self.data["servers"] if x["id"] != server_id]
-            self.data["jobs"] = [x for x in self.data["jobs"] if x["serverId"] != server_id]
+            servers, jobs = self.data["servers"], self.data["jobs"]
+            self.data["servers"] = [x for x in servers if x["id"] != server_id]
+            self.data["jobs"] = [x for x in jobs if x["serverId"] != server_id]
+            try:
+                self.flush()
+            except Exception:
+                self.data["servers"], self.data["jobs"] = servers, jobs
+                raise
             self.panel_sessions.pop(server_id, None)
-            self.flush()
 
     def probe(self, payload):
         paramiko, _ = libraries()
@@ -965,8 +1007,8 @@ MXIOC_PANEL_READONLY"""
             if any(j["serverId"] == server_id and j["status"] == "running" for j in self.data["jobs"]):
                 raise ValueError("请等待安装任务完成后再操作节点")
             operation_lock = self.server_locks.setdefault(server_id, threading.Lock())
-        if not operation_lock.acquire(blocking=False):
-            raise ValueError("该服务器正在处理其他操作，请稍后重试")
+            if not operation_lock.acquire(blocking=False):
+                raise ValueError("该服务器正在处理其他操作，请稍后重试")
         ssh = None
         try:
             ssh = self.connect(record)

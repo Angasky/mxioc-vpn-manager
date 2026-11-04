@@ -2195,6 +2195,7 @@ function serverForm(encoded = '', existing = false) {
   };
   $('serverForm').onsubmit = async e => {
     e.preventDefault();
+    if ($('rsSave').disabled) return;
     if (!pin || !$('rsTrust').checked) return $('rsError').textContent = '请先检测并核对 SSH 主机指纹';
     $('rsSave').disabled = true;
     const payload = {id:s.id, name:val('rsName'),host:val('rsHost'),sshPort:val('rsPort'),sshUser:val('rsUser'),sshPassword:$('rsPassword').value,
