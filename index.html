@@ -1373,6 +1373,29 @@ html:not([data-theme="high"]) .error::before { content: none; }
 /* Keep code alignment without using programming fonts for interface labels. */
 code, pre, textarea.raw, .server-log { font-family: var(--font-mono); line-height: 1.7; }
 html[data-theme] :is(input, button, select, label, .nav, th) { letter-spacing: normal; }
+
+/* Shared native selection controls: override generic input and ID sizing. */
+html body input:is([type="checkbox"], [type="radio"]) {
+  appearance: auto; box-sizing: border-box;
+  width: 16px !important; height: 16px !important;
+  min-width: 16px !important; min-height: 16px !important;
+  max-width: 16px !important; max-height: 16px !important;
+  padding: 0 !important; margin: 0; flex: 0 0 16px;
+  box-shadow: none !important; outline: none !important;
+  vertical-align: middle; cursor: pointer;
+}
+html body input:is([type="checkbox"], [type="radio"]):focus-visible {
+  outline: 2px solid var(--blue) !important; outline-offset: 2px;
+}
+label:has(> input:is([type="checkbox"], [type="radio"])) { justify-content: flex-start; gap: 8px; }
+label:has(> input:is([type="checkbox"], [type="radio"]))::before { content: none !important; }
+.node-secondary { border: 1px solid var(--border-focus); border-radius: 8px; padding: 0; background: var(--surface-inset); margin: 16px 0; }
+.node-secondary > summary { padding: 12px 14px; color: var(--text); font: 600 14px/1.5 var(--font-sans); cursor: pointer; }
+.node-secondary > summary:hover { background: var(--bg-input); }
+.node-secondary > .toolbar { padding: 4px 14px 14px; }
+.node-selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 16px 0 12px; }
+.node-selection-bar > label { display: inline-flex; align-items: center; gap: 8px; margin: 0; font: 500 13px/1.5 var(--font-sans); color: var(--text); cursor: pointer; }
+.node-selection-count { font: 400 13px/1.5 var(--font-sans); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -3506,7 +3529,7 @@ function nodes() {
       <button type="button" class="btn small primary" onclick="chooseNodeServer('subscriptions')">单个节点批量加入订阅</button><button type="button" class="btn small" onclick="chooseNodeServer('browse')">查看服务器节点</button>
       <button type="button" class="btn small" onclick="go('traffic')">订阅流量与有效期</button>
     </div>
-    <details class="node-secondary"><summary>批量操作与名称整理</summary><div class="toolbar">
+    <details class="node-secondary"><summary>批量操作 · 节点选择与名称整理</summary><div class="toolbar">
       <button type="button" class="btn small" onclick="selectAllNodes()">全选全部</button>
       <button type="button" class="btn small" onclick="clearNodeSelection()">取消选择</button>
       <button type="button" class="btn small primary" onclick="autoAddCountryFlags()">${uiIcon('globe')}自动添加国旗</button>
@@ -3515,7 +3538,7 @@ function nodes() {
     </div>
     <div class="note">“自动添加国旗”会处理已勾选节点；未勾选时处理全部节点。系统根据服务器公网 IP 判断国家，并自动去除名称开头已有的国旗后再添加，因此重复执行不会叠加国旗。</div>
     </details>
-    <div class="toolbar"><label><input id="nodeSelectAll" type="checkbox" aria-label="全选当前筛选节点" onchange="toggleAllVisibleNodes(this.checked)"> 选择当前结果</label><span class="muted">显示 ${rows.length} / ${S.data.nodes.length} 个节点</span></div>
+    <div class="node-selection-bar"><label><input id="nodeSelectAll" type="checkbox" aria-label="全选当前筛选节点" onchange="toggleAllVisibleNodes(this.checked)"> 选择当前结果</label><span class="node-selection-count">显示 ${rows.length} / ${S.data.nodes.length} 个节点</span></div>
     <div id="nodeSortStatus" class="node-sort-status" role="status" aria-live="polite">拖动卡片右侧手柄排序，靠近屏幕上下边缘可连续滚动；按 Esc 取消。筛选时按可见节点插入，其他节点保持相对顺序。</div>
     <div id="nodeRows" class="node-grid" role="list" aria-label="节点顺序">
           ${rows.map(x => `
