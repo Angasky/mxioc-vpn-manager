@@ -113,7 +113,33 @@ def command(*args, check=True, timeout=120):
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
+UPSTREAM = re.compile(r'(\bproxy_pass\s+http://(?:127\.0\.0\.1|localhost|\[::1\]):)62577(\s*;)')
+
+
+def discover_nginx():
+    # nginx -T lists only loaded files, including sites-enabled and custom includes.
+    result = command('nginx', '-T', check=False, timeout=20)
+    if result.returncode:
+        raise ValueError('无法读取生效的 Nginx 配置，请在服务器执行 nginx -t 检查配置后重试')
+    candidates = {}
+    blocks = re.split(r'^# configuration file (.+):\s*$', result.stdout, flags=re.M)
+    for index in range(1, len(blocks) - 1, 2):
+        content = re.sub(r'#.*', '', blocks[index + 1])
+        if UPSTREAM.search(content):
+            path = Path(blocks[index]).resolve()
+            candidates[path] = content
+    if not candidates:
+        raise ValueError('未找到生效的 Nginx 配置转发到 Python 后端 62577 端口。请检查是否使用其他反向代理或自定义端口；原服务未改动')
+    if len(candidates) != 1:
+        raise ValueError('发现多个 Nginx 配置转发到 Python 后端，无法安全自动选择：' + '、'.join(map(str, candidates)))
+    path = next(iter(candidates))
+    if not path.is_file():
+        raise ValueError('Nginx 生效配置文件已不存在，请检查配置后重试：' + str(path))
+    return path
+
+
 def preflight():
+    global NGINX
     if os.geteuid() != 0 or platform.system() != 'Linux' or not Path('/run/systemd/system').is_dir():
         raise ValueError('自动迁移需要 root 运行的 Linux / systemd 安装')
     if platform.machine() not in ('x86_64', 'aarch64', 'arm64'):
@@ -123,10 +149,11 @@ def preflight():
             raise ValueError(f'自动迁移缺少命令：{tool}')
     if GO_UNIT.exists() or (GO_BASE / 'current').exists() or (GO_BASE / 'current').is_symlink() or SHORTCUT.exists():
         raise ValueError('已检测到 Go 安装或 mx-p 命令，请先在服务器检查，避免覆盖已有安装')
-    if not AUTH.is_file() or ROOT.is_symlink() or AUTH.is_symlink() or NGINX.is_symlink():
+    if not AUTH.is_file() or ROOT.is_symlink() or AUTH.is_symlink():
         raise ValueError('数据、账号或 Nginx 路径不符合标准安装布局')
+    NGINX = discover_nginx()
     text = NGINX.read_text()
-    if 'proxy_pass http://127.0.0.1:62577;' not in text or 'proxy_set_header X-Forwarded-Proto $scheme;' not in text:
+    if not UPSTREAM.search(text) or not re.search(r'proxy_set_header\s+X-Forwarded-Proto\s+\$scheme\s*;', text):
         raise ValueError('Nginx 转发配置经过自定义，请先恢复标准转发配置再迁移')
     if not re.search(r'^\s*listen\s+[^;]*\bssl\b', text, re.M):
         raise ValueError('请先在旧版启用 HTTPS；新版 Go 后台要求 HTTPS 登录')
@@ -224,6 +251,7 @@ def snapshot(backup):
     shutil.copytree(ROOT, backup / 'root', symlinks=True)
     shutil.copy2(AUTH, backup / 'auth.json')
     shutil.copy2(NGINX, backup / 'nginx.conf')
+    (backup / 'nginx-path.txt').write_text(str(NGINX) + '\n')
     if SUBSCRIBE.exists():
         shutil.copytree(SUBSCRIBE, backup / 'subscribe', symlinks=True)
 
@@ -277,8 +305,7 @@ def handover():
                 install_started = True
                 command('bash', bundle / 'install-go.sh', 'install', timeout=600)
                 mark('switching', 'Go 检查通过，正在切换网页转发')
-                NGINX.write_text(nginx_text.replace('proxy_pass http://127.0.0.1:62577;',
-                                                    'proxy_pass http://127.0.0.1:62578;'))
+                NGINX.write_text(UPSTREAM.sub(r'\g<1>62578\2', nginx_text))
                 command('nginx', '-t')
                 command('systemctl', 'reload', 'nginx')
                 command('systemctl', 'is-active', '--quiet', GO_SERVICE)
