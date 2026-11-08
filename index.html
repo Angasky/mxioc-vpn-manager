@@ -2133,7 +2133,7 @@ async function keepPythonBackend(button) {
 function confirmBackendMigration() {
   openModal('迁移到 Go 后端', `<form id="backendMigrationForm">
     <p class="note">确认后自动下载 Go 安装包、备份并切换后端。切换期间网页会短暂断开；检测到安装或转发失败时将尝试恢复 Python 服务。请等待当前远程节点任务完成后再迁移。</p>
-    <p>迁移目标：Mx-Panel v0.1.2（预览版）。保留原账号、订阅数据及 Nginx HTTPS 地址；备份存放在服务器 /var/backups/mx-panel。</p>
+    <p>迁移目标：Mx-Panel v0.1.3（预览版）。保留原账号、订阅数据及 Nginx HTTPS 地址；备份存放在服务器 /var/backups/mx-panel。</p>
     <label for="migrationUsername">管理员用户名</label><input id="migrationUsername" autocomplete="username" required maxlength="64">
     <label for="migrationPassword">当前密码</label><input id="migrationPassword" type="password" autocomplete="current-password" required maxlength="256">
     <label class="choice"><input id="migrationConfirm" type="checkbox" required>我已了解并选择迁移到 Go 后端</label>
