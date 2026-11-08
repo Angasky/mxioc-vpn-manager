@@ -116,6 +116,63 @@ def command(*args, check=True, timeout=120):
 UPSTREAM = re.compile(r'(\bproxy_pass\s+http://(?:127\.0\.0\.1|localhost|\[::1\]):)62577(\s*;)')
 
 
+def migrated_nginx(text):
+    """Change only legacy upstream directives and their local proxy header.
+
+    Tokenize quotes/comments so braces in strings or commented directives do
+    not affect scope. A location with any proxy_set_header does not inherit
+    headers from its server, so each affected scope needs its own scheme header.
+    """
+    tokens = list(re.finditer(r'''\s+|\#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{};]|[^\s{};"'\#]+''', text))
+    stack, scopes, edits = [0], {0: []}, []
+    directive = []
+    for token in tokens:
+        value = token.group()
+        if value.isspace() or value.startswith('#'):
+            continue
+        if value == '{':
+            stack.append(token.start())
+            scopes[token.start()] = []
+            directive = []
+        elif value == '}':
+            if len(stack) == 1:
+                raise ValueError('Nginx 配置括号不完整')
+            stack.pop()
+            directive = []
+        elif value == ';':
+            if directive:
+                scopes[stack[-1]].append((directive, token.end()))
+            directive = []
+        else:
+            directive.append(token)
+    if len(stack) != 1:
+        raise ValueError('Nginx 配置括号不完整')
+    count = 0
+    for directives in scopes.values():
+        targets = [(parts, end) for parts, end in directives
+                   if len(parts) == 2 and parts[0].group() == 'proxy_pass'
+                   and re.fullmatch(r'http://(?:127\.0\.0\.1|localhost|\[::1\]):62577', parts[1].group())]
+        if not targets:
+            continue
+        for parts, end in targets:
+            target = parts[1]
+            edits.append((target.start(), target.end(), target.group()[:-5] + '62578'))
+            count += 1
+        headers = [(parts, end) for parts, end in directives if len(parts) >= 2
+                   and parts[0].group() == 'proxy_set_header'
+                   and parts[1].group().strip('"\'').lower() == 'x-forwarded-proto']
+        # Remove any duplicate or hardcoded value, then install one trusted value.
+        for parts, end in headers:
+            edits.append((parts[0].start(), end, ''))
+        end = targets[0][1]
+        edits.append((end, end, '\n        proxy_set_header X-Forwarded-Proto $scheme;'))
+    if not count:
+        raise ValueError('未找到可迁移的 Python 转发指令，原配置未改动')
+    for start, end, replacement in sorted(edits, reverse=True):
+        text = text[:start] + replacement + text[end:]
+    return text
+
+
 def discover_nginx():
     # nginx -T lists only loaded files, including sites-enabled and custom includes.
     result = command('nginx', '-T', check=False, timeout=20)
@@ -161,8 +218,7 @@ def preflight(check_nginx=True):
     if check_nginx:
         NGINX = discover_nginx()
         text = NGINX.read_text()
-        if not UPSTREAM.search(text) or not re.search(r'proxy_set_header\s+X-Forwarded-Proto\s+\$scheme\s*;', text):
-            raise ValueError('Nginx 转发配置经过自定义，请先恢复标准转发配置再迁移')
+        migrated_nginx(text)
         if not re.search(r'^\s*listen\s+[^;]*\bssl\b', text, re.M):
             raise ValueError('请先在旧版启用 HTTPS；新版 Go 后台要求 HTTPS 登录')
     profiles = json.loads((ROOT / 'profiles.json').read_text()).get('profiles', [])
@@ -312,7 +368,7 @@ def handover():
                 install_started = True
                 command('bash', bundle / 'install-go.sh', 'install', timeout=600)
                 mark('switching', 'Go 检查通过，正在切换网页转发')
-                NGINX.write_text(UPSTREAM.sub(r'\g<1>62578\2', nginx_text))
+                NGINX.write_text(migrated_nginx(nginx_text))
                 command('nginx', '-t')
                 command('systemctl', 'reload', 'nginx')
                 command('systemctl', 'is-active', '--quiet', GO_SERVICE)
