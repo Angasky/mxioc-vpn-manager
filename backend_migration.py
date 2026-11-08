@@ -120,7 +120,11 @@ def discover_nginx():
     # nginx -T lists only loaded files, including sites-enabled and custom includes.
     result = command('nginx', '-T', check=False, timeout=20)
     if result.returncode:
-        raise ValueError('无法读取生效的 Nginx 配置，请在服务器执行 nginx -t 检查配置后重试')
+        # Do not return the configuration dump (it may contain credentials).
+        errors = [line for line in result.stdout.splitlines()
+                  if '[emerg]' in line or '[alert]' in line or line.startswith('nginx: [')]
+        detail = errors[0][:600] if errors else '请在服务器执行 nginx -t 查看具体原因'
+        raise ValueError('宿主机 Nginx 配置检查失败，原服务未改动：' + detail)
     candidates = {}
     blocks = re.split(r'^# configuration file (.+):\s*$', result.stdout, flags=re.M)
     for index in range(1, len(blocks) - 1, 2):
@@ -138,7 +142,7 @@ def discover_nginx():
     return path
 
 
-def preflight():
+def preflight(check_nginx=True):
     global NGINX
     if os.geteuid() != 0 or platform.system() != 'Linux' or not Path('/run/systemd/system').is_dir():
         raise ValueError('自动迁移需要 root 运行的 Linux / systemd 安装')
@@ -151,13 +155,16 @@ def preflight():
         raise ValueError('已检测到 Go 安装或 mx-p 命令，请先在服务器检查，避免覆盖已有安装')
     if not AUTH.is_file() or ROOT.is_symlink() or AUTH.is_symlink():
         raise ValueError('数据、账号或 Nginx 路径不符合标准安装布局')
-    NGINX = discover_nginx()
-    text = NGINX.read_text()
-    if not UPSTREAM.search(text) or not re.search(r'proxy_set_header\s+X-Forwarded-Proto\s+\$scheme\s*;', text):
-        raise ValueError('Nginx 转发配置经过自定义，请先恢复标准转发配置再迁移')
-    if not re.search(r'^\s*listen\s+[^;]*\bssl\b', text, re.M):
-        raise ValueError('请先在旧版启用 HTTPS；新版 Go 后台要求 HTTPS 登录')
-    command('nginx', '-t')
+    # The web service has ProtectHome/PrivateTmp: certificates visible to nginx
+    # may be hidden here. Only the independent systemd migration job can check
+    # the host configuration. This still runs before downloading/stopping Python.
+    if check_nginx:
+        NGINX = discover_nginx()
+        text = NGINX.read_text()
+        if not UPSTREAM.search(text) or not re.search(r'proxy_set_header\s+X-Forwarded-Proto\s+\$scheme\s*;', text):
+            raise ValueError('Nginx 转发配置经过自定义，请先恢复标准转发配置再迁移')
+        if not re.search(r'^\s*listen\s+[^;]*\bssl\b', text, re.M):
+            raise ValueError('请先在旧版启用 HTTPS；新版 Go 后台要求 HTTPS 登录')
     profiles = json.loads((ROOT / 'profiles.json').read_text()).get('profiles', [])
     for profile in profiles:
         for file in profile.get('files', []):
@@ -175,7 +182,7 @@ def start(root):
             raise ValueError('自动迁移仅支持标准安装路径')
         if migration_active(root):
             raise ValueError('迁移任务正在执行，请勿重复点击')
-        preflight()
+        preflight(check_nginx=False)
         state = read_state(root)
         unit = 'mxioc-backend-migration-' + secrets.token_hex(6)
         state['migration'] = {'status': 'queued', 'unit': unit, 'startedAt': int(time.time()),

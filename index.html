@@ -1114,7 +1114,25 @@ html.theme-switching *, html.theme-switching *::before, html.theme-switching *::
 .nav i { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; }
 .nav .icon { width: 22px; height: 22px; }
 .nav { gap: 12px; min-height: 44px; }
-input[type="checkbox"], input[type="radio"] { accent-color: var(--blue); }
+input[type="checkbox"], input[type="radio"] {
+  appearance: auto;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 16px;
+  vertical-align: middle;
+  accent-color: var(--blue);
+}
+input[type="checkbox"]:focus, input[type="radio"]:focus {
+  box-shadow: none;
+}
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+  outline: 2px solid var(--blue-bright);
+  outline-offset: 2px;
+}
 input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
 ::selection { background: var(--blue-soft); color: var(--text); }
 .theme-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
