@@ -1694,6 +1694,9 @@ function showLogin() {
   S.ruleAction = '';
   $('content').replaceChildren();
   $('modal').classList.add('hidden');
+  S.backendNotice = false;
+  clearInterval(S.backendNoticeTimer);
+  $('modalClose').hidden = false;
   $('modalBody').replaceChildren();
   document.body.classList.remove('modal-open');
   S.modalFocus = null;
@@ -1710,7 +1713,7 @@ async function showAuthenticatedApp() {
   $('boot').classList.add('hidden');
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
-  void checkUpdateNotice();
+  void checkBackendNotice();
 }
 
 async function bootstrap() {
@@ -2015,6 +2018,129 @@ function setTheme(theme) {
   notice(persisted ? `已切换为${({high:'科技', low:'简洁', pink:'猛男'})[theme]}主题` : '主题已切换，当前浏览器未允许保存偏好');
 }
 
+const backendNoticeText = '旧版 Python 后端将不再更新新功能，仅维护和修复 BUG。您可以继续保留当前 Python 版本，也可以前往“设置 → 后端版本”一键迁移到新版 Go 后端。是否迁移由您自行选择。';
+
+async function checkBackendNotice() {
+  try {
+    const status = await api('/backend-choice');
+    S.backendStatus = status;
+    if (status.acknowledged) return void checkUpdateNotice();
+    openModal('后端版本维护公告', `<p class="note">${esc(backendNoticeText)}</p>
+      <p class="muted">点击“我已知晓”仅确认已阅读公告，不会自动迁移。此公告确认后不再弹出。</p>
+      <div id="backendNoticeError" class="error" role="alert"></div>
+      <button id="backendNoticeAck" class="btn primary" disabled>我已知晓（5 秒）</button>`);
+    S.backendNotice = true;
+    $('modalClose').hidden = true;
+    const button = $('backendNoticeAck'), started = performance.now();
+    clearInterval(S.backendNoticeTimer);
+    S.backendNoticeTimer = setInterval(() => {
+      if (!button.isConnected) { clearInterval(S.backendNoticeTimer); return; }
+      const left = Math.max(0, Math.ceil((5000 - (performance.now() - started)) / 1000));
+      button.textContent = left ? `我已知晓（${left} 秒）` : '我已知晓';
+      if (!left) { button.disabled = false; clearInterval(S.backendNoticeTimer); }
+    }, 100);
+    button.onclick = async () => {
+      if (performance.now() - started < 5000) return;
+      button.disabled = true;
+      try {
+        await api('/backend-choice/acknowledge', jsonOpt('POST', {}));
+        S.backendNotice = false;
+        $('modalClose').hidden = false;
+        closeModal();
+        void checkUpdateNotice();
+      } catch (error) {
+        if ($('backendNoticeError')) $('backendNoticeError').textContent = error.message;
+        button.disabled = false;
+      }
+    };
+  } catch (error) {
+    notice('公告读取失败，下次登录将重试：' + error.message);
+  }
+}
+
+async function renderBackendChoice() {
+  const target = $('backendChoice');
+  if (!target) return;
+  try {
+    const status = await api('/backend-choice');
+    if (!target.isConnected) return;
+    const job = status.migration || {};
+    const active = ['queued','downloading','backup','installing','switching','recovery-required'].includes(job.status);
+    target.innerHTML = `<div class="panel-head"><h3>后端版本</h3><span class="pill">当前：Python</span></div>
+      <p>${esc(backendNoticeText)}</p>
+      <p class="hint">迁移会校验安装包、备份数据、切换服务并保留原访问地址。切换期间会短暂中断访问，完成后请使用原账号重新登录。支持标准 Linux / systemd + Nginx HTTPS 安装。</p>
+      ${status.choice === 'python' ? '<p class="note">您已选择继续使用 Python，之后仍可在此迁移。</p>' : ''}
+      ${job.message ? `<p class="note" role="status">${esc(job.message)}</p>` : ''}
+      ${job.backupPath ? `<p class="hint">迁移备份：<code>${esc(job.backupPath)}</code></p>` : ''}
+      <div class="toolbar"><button class="btn primary" onclick="confirmBackendMigration()" ${active ? 'disabled' : ''}>一键迁移到 Go 后端</button>
+      <button class="btn" onclick="keepPythonBackend(this)" ${active ? 'disabled' : ''}>继续使用 Python 后端</button>
+      <button class="btn" onclick="renderBackendChoice()">刷新状态</button></div>`;
+  } catch (error) {
+    if (target.isConnected) target.innerHTML = `<p class="error">${esc(error.message)}</p><button class="btn" onclick="renderBackendChoice()">重试</button>`;
+  }
+}
+
+async function keepPythonBackend(button) {
+  button.disabled = true;
+  try {
+    await api('/backend-choice/keep-python', jsonOpt('POST', {}));
+    notice('已保留 Python 后端，现有服务不变');
+    await renderBackendChoice();
+  } catch (error) { notice(error.message); button.disabled = false; }
+}
+
+function confirmBackendMigration() {
+  openModal('迁移到 Go 后端', `<form id="backendMigrationForm">
+    <p class="note">确认后自动下载 Go 安装包、备份并切换后端。切换期间网页会短暂断开；检测到安装或转发失败时将尝试恢复 Python 服务。请等待当前远程节点任务完成后再迁移。</p>
+    <p>迁移目标：Mx-Panel v0.1.0（预览版）。保留原账号、订阅数据及 Nginx HTTPS 地址；备份存放在服务器 /var/backups/mx-panel。</p>
+    <label for="migrationUsername">管理员用户名</label><input id="migrationUsername" autocomplete="username" required maxlength="64">
+    <label for="migrationPassword">当前密码</label><input id="migrationPassword" type="password" autocomplete="current-password" required maxlength="256">
+    <label class="choice"><input id="migrationConfirm" type="checkbox" required>我已了解并选择迁移到 Go 后端</label>
+    <div id="migrationError" class="error" role="alert"></div>
+    <button class="btn primary" type="submit">确认并开始迁移</button></form>`);
+  $('backendMigrationForm').onsubmit = async event => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api('/backend-choice/migrate', jsonOpt('POST', {confirmation:'MIGRATE',
+        username:$('migrationUsername').value, password:$('migrationPassword').value}));
+      closeModal();
+      openModal('后端迁移中', `<p id="migrationProgress" role="status">任务已启动，正在准备下载。请勿重复迁移或重启服务器。</p>
+        <p class="hint">切换期间可能暂时无法连接，页面会自动检测结果；关闭页面不会中止迁移。</p>
+        <button class="btn primary" onclick="location.reload()">刷新页面 / 重新登录</button>`);
+      void watchBackendMigration();
+    } catch (error) {
+      if ($('migrationError')) $('migrationError').textContent = error.message;
+      button.disabled = false;
+    }
+  };
+}
+
+async function watchBackendMigration() {
+  const target = $('migrationProgress');
+  for (let attempt = 0; attempt < 300 && target?.isConnected; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!target.isConnected) return;
+    try {
+      const health = await fetch('/healthz', {cache:'no-store'});
+      const data = await health.json().catch(() => ({}));
+      if (health.ok && data.runtime === 'go') {
+        target.textContent = '迁移成功，Go 后端已接管。请刷新页面并使用原账号重新登录。';
+        return;
+      }
+      const response = await fetch('/admin/api/backend-choice', {credentials:'same-origin', cache:'no-store',
+        headers:S.token ? {Authorization:'Bearer '+S.token} : {}});
+      if (response.ok) {
+        const status = await response.json(), job = status.migration || {};
+        target.textContent = job.message || '正在迁移…';
+        if (['failed','recovery-required','complete'].includes(job.status)) return;
+      }
+    } catch (_) { target.textContent = '正在切换后端，暂时无法连接，等待服务恢复…'; }
+  }
+  if (target?.isConnected) target.textContent = '等待时间较长，请刷新检查；如仍无法访问，请在服务器查看 mxioc-backend-migration 服务日志及 /var/backups/mx-panel 中的备份。';
+}
+
 function settings() {
   const theme = document.documentElement.dataset.theme;
   $('content').innerHTML = `<section class="panel"><div class="panel-head"><h3>外观与性能</h3><span class="pill">当前设备</span></div>
@@ -2030,7 +2156,8 @@ function settings() {
         <span class="theme-preview pink" aria-hidden="true"></span><strong>猛男主题 · 温柔粉色</strong><p>暖粉底色、柔和边框与舒展留白，搭配衬线标题和圆角组件，让复杂配置也从容清晰。</p>
       </button>
     </div><div class="note">三套主题拥有相同的功能和分页优化。所有组件使用当前主题的统一设计变量。系统开启“减少动态效果”时，科技主题也会降低动画。图标来自 Lucide（ISC），已本地嵌入。</div>
-  </section>`;
+  </section><section id="backendChoice" class="panel"><p class="muted">正在读取后端版本…</p></section>`;
+  void renderBackendChoice();
 }
 
 function profiles() {
@@ -4123,6 +4250,7 @@ async function uninstallManager(e) {
 }
 
 function openModal(title, html) {
+  if (S.backendNotice) return;
   closeSniScanner();
   if ($('modal').classList.contains('hidden')) S.modalFocus = document.activeElement;
   $('modalTitle').textContent = title.replace(/^[A-Z_0-9 ]+\s*\/\/\s*/, '');
@@ -4133,6 +4261,7 @@ function openModal(title, html) {
 }
 
 function closeModal() {
+  if (S.backendNotice) return;
   closeSniScanner();
   if ($('modal').classList.contains('hidden')) return;
   $('modal').querySelectorAll('input[type="password"]').forEach(input => { input.value = ''; });

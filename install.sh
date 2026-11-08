@@ -492,6 +492,7 @@ install_application() {
     SOURCE_ROOT="$(local_source_root)"
     info "获取 MXIOC 管理后台程序……"
     stage_file server.py
+    stage_file backend_migration.py
     stage_file remote_manager.py
     stage_file bandwidth.py
     stage_file mieru_adapter.py
@@ -518,6 +519,7 @@ install_application() {
     for adapter in client_adapter.py core_adapter.py server_monitor.py bandwidth.py reality_probe.py mieru_adapter.py snell_adapter.py shared_users.py managed_nodes.py panel_user_runtime.py certificate_manager.py; do
       [[ ! -f "${APP_DIR}/${adapter}" ]] || cp -- "${APP_DIR}/${adapter}" "${APP_DIR}/code-backups/${adapter}.${stamp}"
     done
+    install -m 0644 "${STAGE_DIR}/backend_migration.py" "${APP_DIR}/backend_migration.py"
     install -m 0644 "${STAGE_DIR}/server.py" "${APP_DIR}/server.py"
     install -m 0644 "${STAGE_DIR}/server_monitor.py" "${APP_DIR}/server_monitor.py"
     install -m 0644 "${STAGE_DIR}/bandwidth.py" "${APP_DIR}/bandwidth.py"

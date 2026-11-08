@@ -27,6 +27,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 from urllib.request import Request, urlopen
 
+import backend_migration
+
 import yaml
 import qrcode
 from qrcode.image.svg import SvgPathImage
@@ -271,6 +273,8 @@ def dismiss_update():
 
 def start_update(force=False):
     with UPDATE_LOCK:
+        if backend_migration.migration_active(ROOT):
+            raise ValueError("后端迁移正在执行，暂时不能更新 Python")
         status = update_status(force=True)
         if status["updating"]:
             raise ValueError("更新任务正在执行，请稍候")
@@ -4318,6 +4322,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/admin/api/account":
                 self.json_out({"username": load_auth()["username"]})
                 return
+            if path == "/admin/api/backend-choice":
+                key = hashlib.sha256((self.headers.get("Authorization", "") + self.headers.get("Cookie", "")).encode()).hexdigest()
+                return self.json_out(backend_migration.notice_status(ROOT, key))
             if path == "/admin/api/updates":
                 self.json_out(update_status())
                 return
@@ -4410,6 +4417,30 @@ class Handler(BaseHTTPRequestHandler):
                 revoke_session(self.headers.get("Authorization", ""), self.headers.get("Cookie", ""))
                 return self.json_out({"ok": True}, headers={"Set-Cookie": expired_session_cookie(self.secure_request())})
             data = self.body()
+            if path.startswith("/admin/api/backend-choice/"):
+                with UPDATE_LOCK:
+                    key = hashlib.sha256((self.headers.get("Authorization", "") + self.headers.get("Cookie", "")).encode()).hexdigest()
+                    if path == "/admin/api/backend-choice/acknowledge":
+                        return self.json_out(backend_migration.acknowledge(ROOT, key))
+                    if path == "/admin/api/backend-choice/keep-python":
+                        return self.json_out(backend_migration.keep_python(ROOT))
+                    if path == "/admin/api/backend-choice/migrate":
+                        if UPDATE_MARKER_FILE.exists():
+                            raise ValueError("Python 更新正在执行，请稍后迁移")
+                        if data.get("confirmation") != "MIGRATE":
+                            raise ValueError("请确认迁移到 Go 后端")
+                        if not self.secure_request():
+                            raise ValueError("迁移必须通过 HTTPS 访问")
+                        if not authenticate(str(data.get("username", "")), str(data.get("password", ""))):
+                            raise ValueError("当前用户名或密码错误")
+                        manager = remote_manager()
+                        with manager.lock:
+                            if any(job.get("status") in {"queued", "running"} for job in manager.data.get("jobs", [])) or any(lock.locked() for lock in manager.server_locks.values()):
+                                raise ValueError("远程服务器任务尚未完成，请稍后再迁移")
+                            return self.json_out(backend_migration.start(ROOT), status=202)
+                return self.json_out({"error": "未知后端操作"}, status=404)
+            if backend_migration.migration_active(ROOT):
+                return self.json_out({"error": "后端迁移正在执行，请等待完成后刷新页面"}, status=409)
             if path == "/admin/api/policy-templates":
                 return self.json_out(save_policy_template("POST", data))
             if path == "/admin/api/profiles":
@@ -4528,6 +4559,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             data = self.body()
+            if backend_migration.migration_active(ROOT):
+                return self.json_out({"error": "后端迁移正在执行，请等待完成后刷新页面"}, status=409)
             if path == "/admin/api/policy-templates":
                 return self.json_out(save_policy_template("PUT", data))
             if path == "/admin/api/profiles":
@@ -4590,6 +4623,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             data = self.body()
+            if backend_migration.migration_active(ROOT):
+                return self.json_out({"error": "后端迁移正在执行，请等待完成后刷新页面"}, status=409)
             if path == "/admin/api/policy-templates":
                 return self.json_out(save_policy_template("DELETE", data))
             if path == "/admin/api/profiles":
