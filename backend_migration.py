@@ -17,7 +17,7 @@ import time
 from urllib.request import Request, urlopen
 
 NOTICE_ID = 'python-maintenance-go-2026-11'
-VERSION = 'v0.1.19'
+VERSION = 'v0.1.21'
 RELEASE = f'https://github.com/Angasky/Mx-Panel/releases/download/go-{VERSION}'
 ROOT = Path('/opt/mxioc-rule-manager')
 AUTH = Path('/etc/mxioc-rule-manager.auth.json')
